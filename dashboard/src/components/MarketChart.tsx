@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
   createChart,
-  CandlestickSeries,
-  HistogramSeries,
   type IChartApi,
   type ISeriesApi,
   type Time,
@@ -66,7 +64,7 @@ export default function MarketChart({
     });
     chartRef.current = chart;
 
-    candleRef.current = chart.addSeries(CandlestickSeries, {
+    candleRef.current = chart.addCandlestickSeries({
       upColor: "#22c55e",
       borderUpColor: "#22c55e",
       wickUpColor: "#22c55e",
@@ -75,7 +73,7 @@ export default function MarketChart({
       wickDownColor: "#ef4444",
     });
 
-    volumeRef.current = chart.addSeries(HistogramSeries, {
+    volumeRef.current = chart.addHistogramSeries({
       priceFormat: { type: "volume" },
       priceScaleId: "volume",
       color: "#6b7280",
