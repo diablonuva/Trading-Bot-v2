@@ -24,5 +24,8 @@ sqlalchemy>=2.0.0
 # HTTP requests (news API, float data)
 requests>=2.31.0
 
+# Finviz float data fallback
+finvizfinance>=0.14.6
+
 # Timezone handling
 pytz>=2023.3

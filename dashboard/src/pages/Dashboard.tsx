@@ -7,12 +7,32 @@ import TradeRow from "../components/TradeRow";
 import PnlBadge from "../components/PnlBadge";
 import type { TradingSession, Trade, Position, EquitySnapshot } from "../types";
 
+type ScanCandidate = {
+  symbol: string;
+  pctChange: number;
+  relativeVolume: number;
+  hasNews: boolean;
+  score: number;
+};
+
+type ScanResult = {
+  candidates: ScanCandidate[];
+};
+
+function getBotStatus(session: TradingSession | null | undefined): { label: string; color: string } {
+  if (!session) return { label: "INACTIVE", color: "gray" };
+  if (session.halted) return { label: "HALTED", color: "red" };
+  if (!session.endedAt) return { label: "RUNNING", color: "green" };
+  return { label: "INACTIVE", color: "gray" };
+}
+
 export default function DashboardPage() {
   const { data: session, refetch: refetchSession } = useApi<TradingSession>("/api/sessions/today");
   const { data: trades, refetch: refetchTrades } = useApi<Trade[]>("/api/trades/today");
   const { data: positions, refetch: refetchPositions } = useApi<Position[]>("/api/positions");
   const { data: equityCurve, refetch: refetchEquity } =
     useApi<EquitySnapshot[]>("/api/performance/equity-curve?days=1");
+  const { data: scanResult, refetch: refetchScan } = useApi<ScanResult>("/api/scanner/latest");
 
   const { on } = useWebSocket();
 
@@ -23,6 +43,7 @@ export default function DashboardPage() {
       on("equity_update", () => refetchEquity()),
       on("session_start", () => refetchSession()),
       on("daily_halt", () => refetchSession()),
+      on("scan_complete", () => refetchScan()),
     ];
     return () => unsub.forEach((fn) => fn());
   }, [on]);
@@ -31,6 +52,8 @@ export default function DashboardPage() {
   const accuracy = session?.accuracyPct?.toFixed(1) ?? "—";
   const unrealizedTotal = positions?.reduce((s, p) => s + (p.unrealizedPnl ?? 0), 0) ?? 0;
   const totalPnl = dayPnl + unrealizedTotal;
+  const botStatus = getBotStatus(session);
+  const watchlist = scanResult?.candidates ?? [];
 
   return (
     <div className="space-y-6">
@@ -38,11 +61,14 @@ export default function DashboardPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-white">Today's Session</h1>
         <div className="flex items-center gap-3">
+          <span className={`badge-${botStatus.color} text-sm px-3 py-1 font-mono font-bold`}>
+            {botStatus.label}
+          </span>
           {session?.halted && (
-            <span className="badge-red text-sm px-3 py-1">⛔ HALTED — {session.haltReason}</span>
+            <span className="badge-red text-sm px-3 py-1">HALTED — {session.haltReason}</span>
           )}
           <span className={`badge-${session ? "green" : "gray"} text-sm px-3 py-1`}>
-            {session ? (session.tradingMode === "paper" ? "📄 Paper" : "💰 Live") : "No session"}
+            {session ? (session.tradingMode === "paper" ? "Paper" : "Live") : "No session"}
           </span>
         </div>
       </div>
@@ -141,6 +167,42 @@ export default function DashboardPage() {
               </thead>
               <tbody>
                 {trades.map((t) => <TradeRow key={t.id} trade={t} />)}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Scanner Watchlist */}
+      <div className="card">
+        <h2 className="text-sm font-semibold text-gray-300 mb-4">
+          Scanner Watchlist
+          <span className="ml-2 badge-yellow">{watchlist.length}</span>
+        </h2>
+        {!watchlist.length ? (
+          <p className="text-gray-600 text-sm">No scan results yet</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-gray-500 text-xs uppercase tracking-wider border-b border-gray-800">
+                  <th className="py-2 px-3">Symbol</th>
+                  <th className="py-2 px-3">% Change</th>
+                  <th className="py-2 px-3">Rel Vol</th>
+                  <th className="py-2 px-3">News</th>
+                  <th className="py-2 px-3">Score</th>
+                </tr>
+              </thead>
+              <tbody>
+                {watchlist.map((c) => (
+                  <tr key={c.symbol} className="border-b border-gray-800 hover:bg-gray-800/50">
+                    <td className="py-2 px-3 font-mono font-bold text-white">{c.symbol}</td>
+                    <td className="py-2 px-3 text-green-400">+{c.pctChange.toFixed(1)}%</td>
+                    <td className="py-2 px-3 text-gray-300">{c.relativeVolume.toFixed(1)}x</td>
+                    <td className="py-2 px-3">{c.hasNews ? <span className="badge-green">Yes</span> : <span className="badge-gray">No</span>}</td>
+                    <td className="py-2 px-3 text-yellow-400 font-mono">{c.score.toFixed(1)}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

@@ -14,8 +14,10 @@ Key design choices:
 
 import os
 import logging
+import time
+import functools
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Callable, TypeVar
 
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import (
@@ -30,6 +32,31 @@ from alpaca.data.requests import StockLatestQuoteRequest, StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
 
 logger = logging.getLogger(__name__)
+
+_F = TypeVar("_F", bound=Callable)
+
+
+def _retry(retries: int = 3, backoff: float = 1.0):
+    """Decorator: retry a method up to `retries` times with linear backoff."""
+    def decorator(fn: _F) -> _F:
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            last_exc: Exception = RuntimeError("no attempts made")
+            for attempt in range(1, retries + 1):
+                try:
+                    return fn(*args, **kwargs)
+                except Exception as exc:
+                    last_exc = exc
+                    if attempt < retries:
+                        logger.warning(
+                            "%s failed (attempt %d/%d): %s — retrying in %.1fs",
+                            fn.__name__, attempt, retries, exc, backoff * attempt,
+                        )
+                        time.sleep(backoff * attempt)
+            logger.error("%s failed after %d retries: %s", fn.__name__, retries, last_exc)
+            raise last_exc
+        return wrapper  # type: ignore[return-value]
+    return decorator
 
 
 @dataclass
@@ -59,6 +86,7 @@ class AlpacaBroker:
     # Account info
     # ------------------------------------------------------------------
 
+    @_retry(retries=3, backoff=1.0)
     def get_equity(self) -> float:
         account = self._trading.get_account()
         return float(account.equity)
@@ -67,6 +95,7 @@ class AlpacaBroker:
         account = self._trading.get_account()
         return float(account.buying_power)
 
+    @_retry(retries=3, backoff=1.0)
     def get_positions(self) -> dict:
         """Returns {symbol: position_obj} for all open positions."""
         positions = self._trading.get_all_positions()
@@ -87,6 +116,7 @@ class AlpacaBroker:
     # Orders
     # ------------------------------------------------------------------
 
+    @_retry(retries=3, backoff=1.0)
     def place_bracket_order(
         self,
         symbol: str,

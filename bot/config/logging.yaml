@@ -1,0 +1,41 @@
+version: 1
+disable_existing_loggers: false
+
+formatters:
+  standard:
+    format: "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
+
+handlers:
+  console:
+    class: logging.StreamHandler
+    formatter: standard
+    stream: ext://sys.stdout
+
+  file:
+    class: logging.handlers.TimedRotatingFileHandler
+    formatter: standard
+    filename: /app/logs/trading_bot.log
+    when: midnight
+    backupCount: 7          # keep 7 days of logs
+    encoding: utf-8
+
+  file_error:
+    class: logging.handlers.RotatingFileHandler
+    formatter: standard
+    filename: /app/logs/errors.log
+    maxBytes: 52428800      # 50 MB per file
+    backupCount: 3
+    encoding: utf-8
+    level: ERROR
+
+root:
+  level: INFO
+  handlers: [console, file, file_error]
+
+loggers:
+  alpaca:
+    level: WARNING
+  urllib3:
+    level: WARNING
+  apscheduler:
+    level: WARNING

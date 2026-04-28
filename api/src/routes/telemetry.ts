@@ -174,16 +174,30 @@ router.post("/scan", async (req: Request, res: Response) => {
     });
     if (!session) return res.status(404).json({ error: "Session not found" });
 
+    const passed = candidates.filter((c: any) => c.passedFilters);
     const scanResult = await prisma.scanResult.create({
       data: {
         sessionId: session.id,
-        candidatesFound: candidates.filter((c: any) => c.passedFilters).length,
+        candidatesFound: passed.length,
         candidates: {
           create: candidates.map((c: any, i: number) => ({ ...c, rank: i + 1 })),
         },
       },
       include: { candidates: true },
     });
+
+    // Upsert WatchlistEntry for each candidate that passed filters
+    for (const c of passed) {
+      await prisma.watchlistEntry.create({
+        data: {
+          sessionId: session.id,
+          symbol: c.symbol,
+          addReason: "periodic_scan",
+          score: c.score ?? null,
+        },
+      });
+    }
+
     broadcast(req.app.locals.wss, "scan_complete", scanResult);
     res.json(scanResult);
   } catch (e: any) {

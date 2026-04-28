@@ -27,10 +27,13 @@ Flow per bar:
 """
 
 import logging
+import logging.config
 import os
+import signal
 import sys
 import time
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import yaml
@@ -49,14 +52,25 @@ from strategy import Strategy
 # Logging setup
 # ---------------------------------------------------------------------------
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler("/app/logs/trading_bot.log"),
-    ],
-)
+def _setup_logging() -> None:
+    log_cfg_path = Path(__file__).parent.parent / "config" / "logging.yaml"
+    logs_dir = Path("/app/logs")
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    if log_cfg_path.exists():
+        with open(log_cfg_path) as f:
+            cfg = yaml.safe_load(f)
+        logging.config.dictConfig(cfg)
+    else:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+            handlers=[
+                logging.StreamHandler(sys.stdout),
+                logging.FileHandler("/app/logs/trading_bot.log"),
+            ],
+        )
+
+_setup_logging()
 logger = logging.getLogger("main")
 
 ET = ZoneInfo("America/New_York")
@@ -268,6 +282,23 @@ class TradingBot:
 
         scheduler.start()
         self._feed.start()
+
+        # SIGTERM handler — close all positions before exiting
+        def _handle_sigterm(signum, frame):
+            logger.info("SIGTERM received — closing all positions and shutting down")
+            try:
+                self._broker.close_all_positions()
+                self._open_positions.clear()
+                logger.info("All positions closed via SIGTERM handler")
+                self._notifier.info("Bot received SIGTERM — all positions closed, shutting down")
+            except Exception as e:
+                logger.error("Error closing positions on SIGTERM: %s", e)
+            finally:
+                scheduler.shutdown(wait=False)
+                self._feed.stop()
+                sys.exit(0)
+
+        signal.signal(signal.SIGTERM, _handle_sigterm)
 
         logger.info("Scheduler running. Waiting for market events...")
         try:

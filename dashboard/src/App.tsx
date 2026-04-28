@@ -5,6 +5,7 @@ import TradesPage from "./pages/Trades";
 import AnalyticsPage from "./pages/Analytics";
 import SignalsPage from "./pages/Signals";
 import EventsPage from "./pages/Events";
+import SettingsPage from "./pages/Settings";
 
 export default function App() {
   const { connected } = useWebSocket();
@@ -24,6 +25,7 @@ export default function App() {
           { to: "/signals", label: "Signals" },
           { to: "/analytics", label: "Analytics" },
           { to: "/events", label: "Events" },
+          { to: "/settings", label: "Settings" },
         ].map(({ to, label }) => (
           <NavLink
             key={to}
@@ -54,6 +56,7 @@ export default function App() {
           <Route path="/signals" element={<SignalsPage />} />
           <Route path="/analytics" element={<AnalyticsPage />} />
           <Route path="/events" element={<EventsPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
         </Routes>
       </main>
     </div>

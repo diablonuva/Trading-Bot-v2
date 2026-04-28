@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Signal:
     symbol: str
-    setup: str            # "micro_pullback" or "bull_flag"
+    setup: str            # "micro_pullback", "bull_flag", or "abcd"
     entry_price: float
     stop_price: float
     target_price: float
@@ -86,8 +86,13 @@ class Strategy:
         if signal:
             return signal
 
-        # Fall back to bull flag (slower-forming, equally reliable)
+        # Try bull flag (slower-forming, equally reliable)
         signal = self._detect_bull_flag(symbol, df, vwap, has_vol_surge)
+        if signal:
+            return signal
+
+        # Try ABCD pattern (Fibonacci-based reversal)
+        signal = self._detect_abcd(symbol, df, vwap, has_vol_surge)
         return signal
 
     # ------------------------------------------------------------------
@@ -118,6 +123,13 @@ class Strategy:
         macd = current_macd(df, self._macd_fast, self._macd_slow, self._macd_signal)
         if macd["crossed_negative"]:
             return True, "MACD crossed below zero (back side of move)"
+
+        # Three consecutive red candles — bearish momentum shift
+        if len(df) >= 3:
+            last3 = df.iloc[-3:]
+            all_red = all(float(row["close"]) < float(row["open"]) for _, row in last3.iterrows())
+            if all_red:
+                return True, "three_red_candles"
 
         return False, ""
 
@@ -264,6 +276,89 @@ class Strategy:
         return Signal(
             symbol=symbol,
             setup="bull_flag",
+            entry_price=round(entry, 2),
+            stop_price=round(stop, 2),
+            target_price=round(target, 2),
+            confidence=confidence,
+        )
+
+    # ------------------------------------------------------------------
+    # ABCD pattern detector
+    # ------------------------------------------------------------------
+
+    def _detect_abcd(
+        self, symbol: str, df: pd.DataFrame, vwap: float, has_vol_surge: bool
+    ) -> Optional[Signal]:
+        """
+        ABCD pattern:
+          A — recent swing low
+          B — strong push to a new high (flagpole)
+          C — pullback to ~61.8% Fibonacci of A→B
+          D — break above B (entry trigger)
+
+        Requires at least 30 bars. Looks back up to 40 candles for A.
+        """
+        if len(df) < 30:
+            return None
+
+        lookback = min(40, len(df) - 1)
+        subset = df.iloc[-lookback:]
+
+        # Find A: lowest low in the lookback window (excluding last 3 bars)
+        search = subset.iloc[:-3]
+        if search.empty:
+            return None
+        a_idx = search["low"].idxmin()
+        a_price = float(df.loc[a_idx, "low"])
+
+        # Find B: highest high after A
+        after_a = df.loc[a_idx:].iloc[1:]
+        if after_a.empty:
+            return None
+        b_idx = after_a["high"].idxmax()
+        b_price = float(df.loc[b_idx, "high"])
+
+        ab_height = b_price - a_price
+        if ab_height <= 0:
+            return None
+
+        # C must be after B: pullback to 50–78.6% Fibonacci of A→B
+        after_b = df.loc[b_idx:].iloc[1:]
+        if after_b.empty or len(after_b) < 2:
+            return None
+        c_price = float(after_b["low"].min())
+        fib_retrace = (b_price - c_price) / ab_height
+
+        if not (0.50 <= fib_retrace <= 0.786):
+            return None
+
+        # D: last close must break above B
+        last_close = float(df["close"].iloc[-1])
+        if last_close <= b_price:
+            return None
+
+        if not has_vol_surge:
+            return None
+
+        entry = last_close
+        stop = c_price - 0.02
+        stop = max(stop, entry - 0.30)
+        risk = entry - stop
+        if risk <= 0:
+            return None
+        target = entry + (risk * self._rr_min)
+
+        # A-quality if the Fibonacci retrace is close to the ideal 61.8%
+        confidence = "A" if (has_vol_surge and 0.55 <= fib_retrace <= 0.70) else "B"
+
+        logger.debug(
+            "ABCD signal: %s | A=%.2f B=%.2f C=%.2f D=%.2f fib=%.1f%% conf=%s",
+            symbol, a_price, b_price, c_price, last_close, fib_retrace * 100, confidence,
+        )
+
+        return Signal(
+            symbol=symbol,
+            setup="abcd",
             entry_price=round(entry, 2),
             stop_price=round(stop, 2),
             target_price=round(target, 2),

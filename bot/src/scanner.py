@@ -243,13 +243,26 @@ class Scanner:
     def _get_float(self, symbol: str) -> Optional[float]:
         """
         Attempt to get float from Finviz public page.
+        Falls back to finvizfinance screener API if the page scrape fails.
         Returns None on failure — filter is skipped for that symbol.
         Cached per session to avoid hammering the endpoint.
         """
         if symbol in self._float_cache:
             return self._float_cache[symbol]
 
+        time.sleep(1)  # avoid hammering Finviz
+
+        val = self._get_float_via_page(symbol)
+        if val is None:
+            val = self._get_float_via_api(symbol)
+
+        self._float_cache[symbol] = val
+        return val
+
+    def _get_float_via_page(self, symbol: str) -> Optional[float]:
+        """Scrape float from Finviz quote page."""
         try:
+            import re
             headers = {"User-Agent": "Mozilla/5.0"}
             resp = requests.get(
                 f"https://finviz.com/quote.ashx?t={symbol}",
@@ -257,28 +270,36 @@ class Scanner:
                 timeout=5,
             )
             if resp.status_code != 200:
-                self._float_cache[symbol] = None
                 return None
 
-            # Parse "Shs Float" field from the Finviz table
-            import re
             match = re.search(r"Shs Float</td><td[^>]*>([^<]+)</td>", resp.text)
             if not match:
-                self._float_cache[symbol] = None
                 return None
 
             raw = match.group(1).strip()
-            # Convert "5.23M" → 5_230_000 or "1.2B" → 1_200_000_000
             multipliers = {"K": 1e3, "M": 1e6, "B": 1e9}
             for suffix, mult in multipliers.items():
                 if raw.upper().endswith(suffix):
-                    val = float(raw[:-1]) * mult
-                    self._float_cache[symbol] = val
-                    return val
-            self._float_cache[symbol] = None
+                    return float(raw[:-1]) * mult
         except Exception:
-            self._float_cache[symbol] = None
+            pass
+        return None
 
+    def _get_float_via_api(self, symbol: str) -> Optional[float]:
+        """Fallback: use finvizfinance package to get float."""
+        try:
+            from finvizfinance.quote import finvizfinance
+            stock = finvizfinance(symbol)
+            info = stock.ticker_fundament()
+            raw = info.get("Shs Float", "")
+            if not raw or raw == "-":
+                return None
+            multipliers = {"K": 1e3, "M": 1e6, "B": 1e9}
+            for suffix, mult in multipliers.items():
+                if raw.upper().endswith(suffix):
+                    return float(raw[:-1]) * mult
+        except Exception as e:
+            logger.debug("finvizfinance fallback failed for %s: %s", symbol, e)
         return None
 
     def _has_recent_news(self, symbol: str) -> bool:

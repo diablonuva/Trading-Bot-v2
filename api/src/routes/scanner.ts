@@ -16,6 +16,22 @@ router.get("/latest", async (_req, res) => {
   }
 });
 
+// GET /api/scanner/watchlist — symbols from most recent WatchlistEntry records
+router.get("/watchlist", async (_req, res) => {
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const entries = await prisma.watchlistEntry.findMany({
+      where: { addedAt: { gte: today } },
+      orderBy: { addedAt: "desc" },
+      select: { symbol: true, addedAt: true, addReason: true, score: true },
+    });
+    res.json(entries);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get("/history", async (req, res) => {
   const { limit = "20" } = req.query;
   try {

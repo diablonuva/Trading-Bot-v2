@@ -1,7 +1,7 @@
 import { useApi } from "../hooks/useApi";
 import StatCard from "../components/StatCard";
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  BarChart, Bar, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer,
   ReferenceLine, CartesianGrid,
 } from "recharts";
 import { format } from "date-fns";
@@ -63,12 +63,11 @@ export default function AnalyticsPage() {
               formatter={(v: number) => [`$${v.toFixed(2)}`, "P&L"]}
             />
             <ReferenceLine y={0} stroke="#374151" />
-            <Bar dataKey="pnl"
-              fill="#22c55e"
-              radius={[3, 3, 0, 0]}
-              // Red for negative days
-              label={false}
-            />
+            <Bar dataKey="pnl" radius={[3, 3, 0, 0]}>
+              {dailyChart.map((d, i) => (
+                <Cell key={i} fill={d.pnl >= 0 ? "#22c55e" : "#ef4444"} />
+              ))}
+            </Bar>
           </BarChart>
         </ResponsiveContainer>
       </div>

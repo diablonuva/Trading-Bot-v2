@@ -48,6 +48,50 @@ router.get("/equity-curve", async (req, res) => {
   }
 });
 
+// GET /api/performance/streaks — win/loss streaks and best/worst day
+router.get("/streaks", async (_req, res) => {
+  try {
+    const sessions = await prisma.tradingSession.findMany({
+      where: { endedAt: { not: null } },
+      orderBy: { date: "asc" },
+      select: { date: true, realizedPnl: true },
+    });
+
+    let curWin = 0, curLoss = 0, maxWin = 0, maxLoss = 0;
+    let bestDay = 0, worstDay = 0;
+
+    for (const s of sessions) {
+      const pnl = s.realizedPnl ?? 0;
+      if (pnl > bestDay) bestDay = pnl;
+      if (pnl < worstDay) worstDay = pnl;
+
+      if (pnl > 0) {
+        curWin++;
+        curLoss = 0;
+        if (curWin > maxWin) maxWin = curWin;
+      } else if (pnl < 0) {
+        curLoss++;
+        curWin = 0;
+        if (curLoss > maxLoss) maxLoss = curLoss;
+      } else {
+        curWin = 0;
+        curLoss = 0;
+      }
+    }
+
+    res.json({
+      currentWinStreak: curWin,
+      currentLossStreak: curLoss,
+      maxWinStreak: maxWin,
+      maxLossStreak: maxLoss,
+      bestDay: Math.round(bestDay * 100) / 100,
+      worstDay: Math.round(worstDay * 100) / 100,
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/performance/daily — daily P&L series
 router.get("/daily", async (req, res) => {
   const { days = "30" } = req.query;
