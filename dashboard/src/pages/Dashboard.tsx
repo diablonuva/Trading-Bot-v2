@@ -149,25 +149,25 @@ export default function DashboardPage() {
   }, [alpacaPositions, botPositions, watchlist]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* Header row */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-white">Today's Session</h1>
-        <div className="flex items-center gap-3">
-          <span className={`badge-${botStatus.color} text-sm px-3 py-1 font-mono font-bold`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-lg sm:text-xl font-bold text-white">Today's Session</h1>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className={`badge-${botStatus.color} text-xs sm:text-sm px-2 sm:px-3 py-1 font-mono font-bold`}>
             {botStatus.label}
           </span>
           {session?.halted && (
-            <span className="badge-red text-sm px-3 py-1">HALTED — {session.haltReason}</span>
+            <span className="badge-red text-xs sm:text-sm px-2 sm:px-3 py-1">HALTED — {session.haltReason}</span>
           )}
-          <span className={`badge-${session ? "green" : "gray"} text-sm px-3 py-1`}>
+          <span className={`badge-${session ? "green" : "gray"} text-xs sm:text-sm px-2 sm:px-3 py-1`}>
             {session ? (session.tradingMode === "paper" ? "Paper" : "Live") : "No session"}
           </span>
         </div>
       </div>
 
       {/* Key stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
         <StatCard
           label="Day P&L (realized)"
           value={`${dayPnl >= 0 ? "+" : ""}$${dayPnl.toFixed(2)}`}
@@ -201,7 +201,7 @@ export default function DashboardPage() {
               <span className="badge-gray text-[10px]">{account?.mode?.toUpperCase() ?? "PAPER"}</span>
               <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" title="Live from Alpaca" />
             </p>
-            <p className="text-4xl font-bold font-mono text-white mt-1">
+            <p className="text-3xl sm:text-4xl font-bold font-mono text-white mt-1 break-all">
               ${portfolioValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
             <p className={`text-sm font-mono mt-1 ${portfolioChange >= 0 ? "text-green-400" : "text-red-400"}`}>
@@ -254,16 +254,16 @@ export default function DashboardPage() {
               // Look up the bot-tracked stop/target if this position was opened by the bot
               const botRow = botPositions?.find((b) => b.symbol === p.symbol);
               return (
-                <div key={p.symbol} className="flex items-center justify-between bg-gray-800 rounded-lg px-4 py-3">
-                  <div>
-                    <span className="font-mono font-bold text-white text-lg">{p.symbol}</span>
-                    <span className="ml-3 text-gray-500 text-sm">{p.qty} shares</span>
-                    <span className="ml-2 text-gray-600 text-xs">({p.side})</span>
+                <div key={p.symbol} className="flex flex-col sm:flex-row sm:items-center sm:justify-between bg-gray-800 rounded-lg px-3 sm:px-4 py-3 gap-2">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span className="font-mono font-bold text-white text-base sm:text-lg">{p.symbol}</span>
+                    <span className="text-gray-500 text-sm">{p.qty} shares</span>
+                    <span className="text-gray-600 text-xs">({p.side})</span>
                     {botRow?.setup && (
-                      <span className="ml-2 badge-gray">{botRow.setup.replace(/_/g, " ")}</span>
+                      <span className="badge-gray">{botRow.setup.replace(/_/g, " ")}</span>
                     )}
                   </div>
-                  <div className="text-right">
+                  <div className="sm:text-right">
                     <div className="font-mono text-sm text-gray-400">
                       Entry <span className="text-white">${p.avgEntryPrice.toFixed(2)}</span>
                       <> → <span className="text-white">${p.currentPrice.toFixed(2)}</span></>
@@ -277,10 +277,12 @@ export default function DashboardPage() {
                         <span className="font-mono text-green-400">${botRow.targetPrice.toFixed(2)}</span>
                       </div>
                     )}
-                    <PnlBadge value={p.unrealizedPnl} />
-                    <span className={`ml-2 text-xs font-mono ${p.unrealizedPnlPct >= 0 ? "text-green-400" : "text-red-400"}`}>
-                      ({p.unrealizedPnlPct >= 0 ? "+" : ""}{p.unrealizedPnlPct.toFixed(2)}%)
-                    </span>
+                    <div className="flex items-center gap-2 sm:justify-end mt-1">
+                      <PnlBadge value={p.unrealizedPnl} />
+                      <span className={`text-xs font-mono ${p.unrealizedPnlPct >= 0 ? "text-green-400" : "text-red-400"}`}>
+                        ({p.unrealizedPnlPct >= 0 ? "+" : ""}{p.unrealizedPnlPct.toFixed(2)}%)
+                      </span>
+                    </div>
                   </div>
                 </div>
               );

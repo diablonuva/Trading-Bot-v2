@@ -34,8 +34,19 @@ interface Props {
 export default function MarketChart({
   defaultSymbol = "SPY",
   symbols = ["SPY", "QQQ", "IWM"],
-  height = 360,
+  height,
 }: Props) {
+  // Adaptive height: 240 on phones, 360 on desktop. Done in JS so the
+  // chart resizes after orientation change, not just on first render.
+  const [resolvedHeight, setResolvedHeight] = useState<number>(
+    typeof window !== "undefined" && window.innerWidth < 640 ? 240 : 360,
+  );
+  useEffect(() => {
+    if (height) { setResolvedHeight(height); return; }
+    const onResize = () => setResolvedHeight(window.innerWidth < 640 ? 240 : 360);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [height]);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -60,7 +71,7 @@ export default function MarketChart({
       rightPriceScale: { borderColor: "#1f2937" },
       timeScale: { borderColor: "#1f2937", timeVisible: true, secondsVisible: false },
       width: containerRef.current.clientWidth,
-      height,
+      height: resolvedHeight,
     });
     chartRef.current = chart;
 
@@ -96,7 +107,7 @@ export default function MarketChart({
       candleRef.current = null;
       volumeRef.current = null;
     };
-  }, [height]);
+  }, [resolvedHeight]);
 
   // ---- fetch bars whenever symbol or timeframe changes ----
   useEffect(() => {
@@ -166,7 +177,7 @@ export default function MarketChart({
           ))}
         </div>
       </div>
-      <div ref={containerRef} className="w-full" style={{ height }} />
+      <div ref={containerRef} className="w-full" style={{ height: resolvedHeight }} />
       {loading && <p className="text-xs text-gray-500 mt-2">Loading...</p>}
       {error && <p className="text-xs text-red-400 mt-2">Error: {error}</p>}
     </div>

@@ -3,18 +3,34 @@
 @tailwind utilities;
 
 @layer base {
+  html, body {
+    /* iOS Safari: avoid 300ms tap delay and hide blue tap highlight */
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+  }
   body {
     @apply bg-gray-950 text-gray-100 font-sans antialiased;
     font-family: 'Inter', sans-serif;
+    /* Respect notched devices (iPhone X+) */
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+    padding-bottom: env(safe-area-inset-bottom);
   }
   .font-mono {
     font-family: 'JetBrains Mono', monospace;
+  }
+  /* Prevent iOS Safari from auto-zooming when focusing inputs (16px+ avoids it) */
+  input, select, textarea, button {
+    font-size: 16px;
+  }
+  @media (min-width: 640px) {
+    input, select, textarea, button { font-size: inherit; }
   }
 }
 
 @layer components {
   .card {
-    @apply bg-gray-900 border border-gray-800 rounded-xl p-5;
+    @apply bg-gray-900 border border-gray-800 rounded-xl p-4 sm:p-5;
   }
   .badge-green {
     @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-900/50 text-green-400 border border-green-800;
