@@ -1,0 +1,28 @@
+# Alpaca broker + market data
+alpaca-py>=0.20.0
+
+# Data processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Technical indicators (VWAP, MACD, EMA, etc.)
+pandas-ta>=0.3.14b0
+
+# Scheduling (cron-style job runner within Python)
+APScheduler>=3.10.0
+
+# Configuration
+pyyaml>=6.0
+python-dotenv>=1.0.0
+
+# Telegram notifications
+python-telegram-bot>=20.0
+
+# Database
+sqlalchemy>=2.0.0
+
+# HTTP requests (news API, float data)
+requests>=2.31.0
+
+# Timezone handling
+pytz>=2023.3

@@ -1,0 +1,85 @@
+# ============================================================
+# Trading Bot Configuration
+# All tunable parameters live here — no code changes needed.
+# ============================================================
+
+trading:
+  timezone: "America/New_York"
+  # Pre-market scan begins (broker must support pre-market data)
+  scan_start_time: "06:45"
+  # Earliest order time (Alpaca supports 4:00 AM but liquidity is thin)
+  trading_start_time: "07:00"
+  # Market open — switch to aggressive mode
+  market_open_time: "09:30"
+  # Stop accepting new entries after this time
+  stop_entries_time: "11:00"
+  # Close ALL open positions by this time
+  close_all_time: "12:00"
+  # Candle timeframe for signals (minutes)
+  candle_timeframe_minutes: 1
+
+scanner:
+  # Price range sweet spot ($2–$20)
+  price_min: 2.0
+  price_max: 20.0
+  # Relative volume vs 50-day average (5x minimum)
+  relative_volume_min: 5.0
+  # Must already be up at least this % today
+  pct_change_min: 10.0
+  # Float in millions — lower float = bigger moves
+  float_max_millions: 20.0
+  # How many top stocks to track on watchlist
+  watchlist_size: 5
+  # Minimum pre-market volume (shares) to consider
+  premarket_volume_min: 50000
+  # Minimum pre-market gap % to flag as news-driven
+  premarket_gap_pct_min: 2.0
+  # Re-scan interval in seconds
+  scan_interval_seconds: 60
+
+risk:
+  # % of account equity to risk on a single trade
+  account_risk_pct: 1.0
+  # Hard stop loss in dollars per share
+  stop_loss_per_share: 0.10
+  # Minimum risk-to-reward ratio required to enter
+  reward_to_risk_min: 2.0
+  # Halt ALL trading if daily loss exceeds this % of starting equity
+  max_daily_loss_pct: 2.0
+  # Maximum number of new entries allowed per day
+  max_trades_per_day: 10
+  # After hitting daily profit goal, allow give-back of this % before stopping
+  daily_giveback_pct: 20.0
+
+indicators:
+  # MACD settings
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  # EMAs used for trend context
+  ema_short: 9
+  ema_long: 20
+  # Volume on breakout candle must exceed N-period average by this multiplier
+  volume_surge_multiplier: 1.5
+  # Candles to look back for average volume calculation
+  volume_avg_period: 10
+  # Micro pullback: max candles in the pullback phase before signal is stale
+  pullback_max_candles: 5
+  # Max % retrace of flagpole allowed during pullback
+  pullback_max_retrace_pct: 50.0
+  # Bull flag: max candles in consolidation phase
+  flag_max_candles: 12
+  # Shooting star / topping tail: ratio of upper wick to candle body
+  topping_tail_ratio: 2.0
+
+notifications:
+  # Set to false to disable Telegram alerts without removing credentials
+  telegram_enabled: true
+  # Alert on every trade entry
+  alert_on_entry: true
+  # Alert on every trade exit
+  alert_on_exit: true
+  # Alert when daily loss limit is hit
+  alert_on_daily_halt: true
+  # Send end-of-day summary
+  alert_eod_summary: true

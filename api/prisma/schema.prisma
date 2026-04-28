@@ -1,0 +1,350 @@
+// Trading-Bot-v2 — Prisma Schema
+// Database: PostgreSQL 16
+// Every telemetry event the bot produces is captured here.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// TRADING SESSIONS
+// One record per calendar day the bot is active.
+// ============================================================
+model TradingSession {
+  id              String    @id @default(cuid())
+  date            DateTime  @unique @db.Date
+  startedAt       DateTime  @default(now())
+  endedAt         DateTime?
+  startingEquity  Float
+  endingEquity    Float?
+  realizedPnl     Float     @default(0)
+  totalTrades     Int       @default(0)
+  winningTrades   Int       @default(0)
+  losingTrades    Int       @default(0)
+  accuracyPct     Float?
+  avgWinner       Float?
+  avgLoser        Float?
+  halted          Boolean   @default(false)
+  haltReason      String?
+  tradingMode     String    @default("paper")  // paper | live
+
+  trades          Trade[]
+  signals         Signal[]
+  scanResults     ScanResult[]
+  equitySnapshots EquitySnapshot[]
+  botEvents       BotEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([date])
+}
+
+// ============================================================
+// TRADES — every executed entry+exit pair
+// ============================================================
+model Trade {
+  id              String         @id @default(cuid())
+  sessionId       String
+  session         TradingSession @relation(fields: [sessionId], references: [id])
+
+  symbol          String
+  setup           String         // micro_pullback | bull_flag
+  side            String         @default("buy")
+  qty             Int
+
+  entryPrice      Float
+  entryTime       DateTime
+  entryOrderId    String?
+
+  exitPrice       Float?
+  exitTime        DateTime?
+  exitOrderId     String?
+  exitReason      String?        // bracket_stop | bracket_target | vwap_breach | topping_tail | macd_cross | manual | eod
+
+  stopPrice       Float
+  targetPrice     Float
+  riskPerShare    Float
+  rewardPerShare  Float
+  rrRatio         Float
+
+  realizedPnl     Float?
+  pnlPct          Float?         // % gain/loss relative to entry
+  holdMinutes     Int?
+
+  // Indicator values at entry (snapshot for analysis)
+  entryVwap       Float?
+  entryMacd       Float?
+  entryRvol       Float?         // relative volume at entry
+  entryAtr        Float?
+
+  // Signal that triggered this trade
+  signalId        String?
+  signal          Signal?        @relation(fields: [signalId], references: [id])
+
+  status          TradeStatus    @default(OPEN)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sessionId])
+  @@index([symbol])
+  @@index([entryTime])
+  @@index([status])
+}
+
+enum TradeStatus {
+  OPEN
+  CLOSED
+  CANCELLED
+}
+
+// ============================================================
+// SIGNALS — every signal evaluated (whether traded or not)
+// Allows analysis of signal quality vs. actual trades
+// ============================================================
+model Signal {
+  id              String         @id @default(cuid())
+  sessionId       String
+  session         TradingSession @relation(fields: [sessionId], references: [id])
+
+  symbol          String
+  setup           String         // micro_pullback | bull_flag
+  confidence      String         // A | B
+  timestamp       DateTime       @default(now())
+
+  entryPrice      Float
+  stopPrice       Float
+  targetPrice     Float
+  rrRatio         Float
+
+  // Why signal was taken or rejected
+  acted           Boolean        @default(false)
+  rejectionReason String?        // risk_halted | max_trades | rr_too_low | already_in_position | ...
+
+  // Market state at signal time
+  vwap            Float?
+  macdLine        Float?
+  macdHistogram   Float?
+  rvolAtSignal    Float?
+  price           Float?
+  pctChange       Float?
+
+  trades          Trade[]
+
+  createdAt DateTime @default(now())
+
+  @@index([sessionId])
+  @@index([symbol])
+  @@index([timestamp])
+  @@index([acted])
+}
+
+// ============================================================
+// SCAN RESULTS — output of each scanner run
+// ============================================================
+model ScanResult {
+  id          String         @id @default(cuid())
+  sessionId   String
+  session     TradingSession @relation(fields: [sessionId], references: [id])
+  scannedAt   DateTime       @default(now())
+  candidatesFound Int
+  candidates  ScanCandidate[]
+
+  createdAt DateTime @default(now())
+
+  @@index([sessionId])
+  @@index([scannedAt])
+}
+
+model ScanCandidate {
+  id            String     @id @default(cuid())
+  scanResultId  String
+  scanResult    ScanResult @relation(fields: [scanResultId], references: [id])
+
+  symbol        String
+  price         Float
+  pctChange     Float
+  volume        Float
+  avgDailyVolume Float
+  relativeVolume Float
+  floatShares   Float?
+  hasNews       Boolean
+  premarketGap  Float
+  score         Float
+  passedFilters Boolean
+  rank          Int?
+
+  createdAt DateTime @default(now())
+
+  @@index([scanResultId])
+  @@index([symbol])
+}
+
+// ============================================================
+// EQUITY SNAPSHOTS — periodic account equity for charts
+// ============================================================
+model EquitySnapshot {
+  id          String         @id @default(cuid())
+  sessionId   String?
+  session     TradingSession? @relation(fields: [sessionId], references: [id])
+
+  equity      Float
+  buyingPower Float?
+  dayPnl      Float?
+  openPositionCount Int?
+  timestamp   DateTime       @default(now())
+
+  @@index([sessionId])
+  @@index([timestamp])
+}
+
+// ============================================================
+// POSITIONS — open positions state (upserted each update)
+// ============================================================
+model Position {
+  id           String   @id @default(cuid())
+  symbol       String   @unique
+  qty          Int
+  entryPrice   Float
+  currentPrice Float?
+  stopPrice    Float
+  targetPrice  Float
+  unrealizedPnl Float?
+  setup        String?
+  entryTime    DateTime
+  updatedAt    DateTime @updatedAt
+
+  @@index([symbol])
+}
+
+// ============================================================
+// BOT EVENTS — state changes, errors, lifecycle events
+// ============================================================
+model BotEvent {
+  id          String         @id @default(cuid())
+  sessionId   String?
+  session     TradingSession? @relation(fields: [sessionId], references: [id])
+
+  eventType   BotEventType
+  severity    EventSeverity  @default(INFO)
+  message     String
+  metadata    Json?          // arbitrary key-value for extra context
+  timestamp   DateTime       @default(now())
+
+  @@index([sessionId])
+  @@index([eventType])
+  @@index([timestamp])
+  @@index([severity])
+}
+
+enum BotEventType {
+  SESSION_START
+  SESSION_END
+  SCAN_COMPLETE
+  WATCHLIST_UPDATE
+  TRADE_ENTRY
+  TRADE_EXIT
+  ORDER_PLACED
+  ORDER_FILLED
+  ORDER_CANCELLED
+  DAILY_HALT
+  RISK_LIMIT_HIT
+  ENTRIES_STOPPED
+  POSITIONS_CLOSED
+  CONNECTION_ERROR
+  BROKER_ERROR
+  STRATEGY_ERROR
+  INFO
+}
+
+enum EventSeverity {
+  DEBUG
+  INFO
+  WARNING
+  ERROR
+  CRITICAL
+}
+
+// ============================================================
+// ORDERS — raw order records from broker
+// ============================================================
+model Order {
+  id          String      @id @default(cuid())
+  brokerId    String?     @unique   // Alpaca order ID
+  symbol      String
+  side        String      // buy | sell
+  orderType   String      // market | limit | stop | bracket
+  qty         Int
+  price       Float?
+  stopPrice   Float?
+  targetPrice Float?
+  filledPrice Float?
+  status      OrderStatus @default(PENDING)
+  placedAt    DateTime    @default(now())
+  filledAt    DateTime?
+
+  @@index([symbol])
+  @@index([status])
+  @@index([placedAt])
+}
+
+enum OrderStatus {
+  PENDING
+  FILLED
+  PARTIALLY_FILLED
+  CANCELLED
+  REJECTED
+}
+
+// ============================================================
+// PERFORMANCE METRICS — aggregated, computed nightly
+// ============================================================
+model PerformanceMetric {
+  id            String   @id @default(cuid())
+  period        String   // daily | weekly | monthly | all_time
+  periodStart   DateTime @db.Date
+  periodEnd     DateTime @db.Date
+
+  totalTrades   Int
+  winningTrades Int
+  losingTrades  Int
+  accuracyPct   Float
+  grossPnl      Float
+  netPnl        Float
+  avgWinner     Float
+  avgLoser      Float
+  profitFactor  Float    // gross_wins / gross_losses
+  maxDrawdown   Float
+  maxDrawdownPct Float
+  sharpeRatio   Float?
+  winStreak     Int      @default(0)
+  lossStreak    Int      @default(0)
+  bestTrade     Float    @default(0)
+  worstTrade    Float    @default(0)
+
+  calculatedAt  DateTime @default(now())
+
+  @@index([period])
+  @@index([periodStart])
+}
+
+// ============================================================
+// WATCHLIST ENTRIES — symbols monitored each session
+// ============================================================
+model WatchlistEntry {
+  id          String   @id @default(cuid())
+  sessionId   String
+  symbol      String
+  addedAt     DateTime @default(now())
+  addReason   String?  // pre_market_scan | market_open_scan | periodic_scan
+  score       Float?
+
+  @@index([sessionId])
+  @@index([symbol])
+}

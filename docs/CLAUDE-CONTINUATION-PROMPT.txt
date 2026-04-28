@@ -1,0 +1,295 @@
+==============================================================================
+  TRADING-BOT-V2 — CLAUDE CODE CONTINUATION PROMPT
+  Use this prompt to continue building the project in VS Code with Claude Code
+==============================================================================
+
+PROJECT CONTEXT
+---------------
+You are working on Trading-Bot-v2, a fully automated momentum day trading bot
+based on the DaytradeWarrior (Ross Cameron) methodology. The project is a
+Docker monorepo targeting Raspberry Pi 5 deployment.
+
+REPO: Trading-Bot-v2 (GitHub — create at github.com/new)
+PI DEPLOYMENT: /home/diablo/docker/trading-bots/ross/ (IP: 192.168.0.12:3200)
+WORKING DIR: C:\Users\diabl\Documents\AI TRADING\Trading-Bot-v2\
+
+WHAT IS ALREADY BUILT (DO NOT RECREATE)
+-----------------------------------------
+All scaffolding is complete. The following files exist and are functional:
+
+  bot/
+    src/main.py          — Fully automatic orchestrator (APScheduler, 6:45–12:00 ET)
+    src/scanner.py       — 5-pillar stock screener (price/rvol/pct/float/news)
+    src/strategy.py      — Micro pullback + bull flag signal engine (A/B confidence)
+    src/indicators.py    — VWAP, MACD, EMA, relative volume, candle patterns
+    src/risk_manager.py  — Position sizing, daily loss halt, 2:1 R:R gate
+    src/broker.py        — Alpaca bracket orders, positions, REST data
+    src/data_feed.py     — Alpaca WebSocket 1-min bar stream, rolling 100-bar buffer
+    src/notifier.py      — Telegram alerts (trade entry/exit, EOD summary)
+    src/telemetry.py     — Posts all events to Node.js API (fire-and-forget threads)
+    config/settings.yaml — All tunable parameters (no code changes needed)
+    Dockerfile           — ARM64 Python 3.11 image
+    requirements.txt     — All Python deps including alpaca-py, pandas-ta, APScheduler
+
+  api/
+    src/index.ts                  — Express app + WebSocket server (port 4000)
+    src/websocket.ts              — WS broadcast utility
+    src/routes/telemetry.ts       — All /telemetry/* POST endpoints (bot → API)
+    src/routes/trades.ts          — GET /api/trades, /api/trades/today
+    src/routes/sessions.ts        — GET /api/sessions, /api/sessions/today
+    src/routes/signals.ts         — GET /api/signals
+    src/routes/scanner.ts         — GET /api/scanner/latest
+    src/routes/performance.ts     — GET /api/performance/summary, /equity-curve, /daily
+    src/routes/events.ts          — GET /api/events
+    src/routes/positions.ts       — GET /api/positions
+    prisma/schema.prisma          — Full PostgreSQL schema (10 tables, all telemetry)
+    package.json / tsconfig.json  — TypeScript project config
+    Dockerfile                    — Node 20 Alpine, runs prisma migrate + node dist/
+
+  dashboard/
+    src/App.tsx                   — React Router layout + nav + WS status indicator
+    src/main.tsx + index.css      — Entry point, Tailwind CSS
+    src/types/index.ts            — All TypeScript interfaces
+    src/hooks/useWebSocket.ts     — WS client with auto-reconnect + event subscription
+    src/hooks/useApi.ts           — Generic REST fetch hook
+    src/components/StatCard.tsx   — KPI stat card
+    src/components/PnlBadge.tsx   — Colored P&L display
+    src/components/EquityChart.tsx— Recharts area chart for equity curve
+    src/components/TradeRow.tsx   — Trade table row
+    src/pages/Dashboard.tsx       — Main page: P&L, positions, trades, equity chart
+    src/pages/Trades.tsx          — Trade history with status filter
+    src/pages/Analytics.tsx       — Performance stats + daily P&L bar chart
+    src/pages/Signals.tsx         — Signal log (acted + rejected)
+    src/pages/Events.tsx          — Real-time bot event log
+    package.json / vite.config.ts / tailwind.config.js / Dockerfile
+
+  nginx/nginx.conf                — Reverse proxy: port 3200 → dashboard + /api + /ws
+  docker-compose.yml              — All 5 services: postgres + api + bot + dashboard + nginx
+  .env.example                    — Template for all credentials
+
+  docs/
+    Trading-Bot-v2-Specification.pdf  — Full system specification (10 sections)
+    CLAUDE-CONTINUATION-PROMPT.txt    — This file
+
+
+TECH STACK SUMMARY
+------------------
+  Python bot:   alpaca-py, pandas-ta, APScheduler, PyYAML, python-dotenv, requests
+  API:          Node.js 20, TypeScript, Express, Prisma ORM, ws (WebSocket)
+  Database:     PostgreSQL 16 (all telemetry — 10 tables)
+  Dashboard:    React 18, Vite, TypeScript, Tailwind CSS v3, Recharts, React Router v6
+  Container:    Docker Compose, nginx:alpine reverse proxy
+  Hardware:     Raspberry Pi 5 (ARM64), Raspberry Pi OS
+
+TRADING RULES (ENFORCED IN CODE — DO NOT CHANGE WITHOUT TESTING)
+-----------------------------------------------------------------
+  • 5-pillar scanner: price $2–$20, rel-vol ≥ 5x, %change ≥ 10%, float < 20M, news
+  • Entry signals: micro pullback OR bull flag (A-quality only)
+  • Entry gates: MACD > 0, price > VWAP, volume surge ≥ 1.5×, time 7:00–11:00 AM ET
+  • Position size: 1% account equity ÷ stop distance
+  • Stop: 10 cents per share default, bracket order auto-placed
+  • Target: 2× the risk (2:1 R:R minimum)
+  • Daily halt: if day P&L ≤ -2% starting equity, bot stops all entries
+  • Max trades/day: 10
+  • All positions closed by 12:00 PM ET
+  • Soft exits: VWAP breach, topping tail, MACD crossover negative
+
+
+IMMEDIATE NEXT TASKS (COMPLETE THESE IN ORDER)
+------------------------------------------------
+
+TASK 1 — GitHub Setup
+  • Run: git init, git add ., git commit -m "feat: initial Trading-Bot-v2 monorepo"
+  • Create repo at github.com/new named "Trading-Bot-v2"
+  • Push: git remote add origin https://github.com/diablonuva/Trading-Bot-v2.git
+  • Push: git push -u origin main
+  • Add .github/workflows/docker-build.yml — CI that builds all Docker images on push to main
+
+TASK 2 — Alpaca Paper Account
+  • Go to alpaca.markets → sign up → Paper Trading → API Keys → generate new key
+  • Copy .env.example → .env in the project root
+  • Fill in: ALPACA_API_KEY, ALPACA_SECRET_KEY, TRADING_MODE=paper, POSTGRES_PASSWORD
+  • Verify connectivity: python bot/src/broker.py (add a quick test at bottom)
+
+TASK 3 — Pi 5 Deployment
+  • SSH into Pi: ssh diablo@192.168.0.12
+  • Run: mkdir -p /home/diablo/docker/trading-bots/ross && cd /home/diablo/docker/trading-bots/ross
+  • Run: git clone https://github.com/diablonuva/Trading-Bot-v2.git .
+  • Copy and fill .env
+  • Run: docker compose up --build -d
+  • Verify: curl http://localhost:3200/health → should return {"ok":true}
+  • Open browser: http://192.168.0.12:3200
+
+TASK 4 — Dashboard Enhancements
+  File: dashboard/src/pages/Dashboard.tsx
+  File: dashboard/src/pages/Analytics.tsx
+
+  Add these missing features:
+  a) Scanner Watchlist card on Dashboard — shows last scan result candidates
+     API: GET /api/scanner/latest (exists, returns {candidates: [{symbol, pctChange, relativeVolume, hasNews, score}]})
+  b) Daily P&L bar chart — color red bars for negative days (currently all green)
+     In Analytics.tsx, BarChart Bar component needs Cell coloring:
+       import { Cell } from "recharts"
+       <Bar dataKey="pnl" ...>
+         {dailyChart.map((d, i) => <Cell key={i} fill={d.pnl >= 0 ? "#22c55e" : "#ef4444"} />)}
+       </Bar>
+  c) Bot status indicator on Dashboard header — show "RUNNING", "HALTED", "INACTIVE"
+     Derive from: session exists + !session.halted + session.endedAt == null → RUNNING
+
+TASK 5 — API Enhancements
+  File: api/src/routes/telemetry.ts
+  File: api/src/routes/performance.ts
+
+  a) Add GET /api/performance/streaks — win streak, loss streak, best/worst day
+  b) Add GET /api/scanner/watchlist — returns symbols from most recent WatchlistEntry records
+  c) In telemetry/scan handler — also upsert WatchlistEntry records for passed candidates
+
+TASK 6 — Bot Enhancements
+  File: bot/src/scanner.py
+  File: bot/src/strategy.py
+
+  a) In scanner.py: add fallback float source — if Finviz scrape fails, try
+     https://api.finviz.com/screener.ashx?v=111&f=sh_float_u20&o=-volume
+     (requires finviz Python package: pip install finvizfinance)
+  b) In strategy.py: add ABCD pattern detection as a third setup type
+     - Point A: recent swing low
+     - Point B: strong push to new high (flagpole)
+     - Point C: pullback to ~61.8% Fibonacci of A→B
+     - Point D: break above B (entry)
+     - Add to Signal.setup type: "abcd"
+  c) In strategy.py should_exit(): add check for three consecutive red candles
+     (bearish momentum shift) → return True, "three_red_candles"
+
+TASK 7 — Backtest Module
+  Create: bot/src/backtest.py
+
+  Purpose: replay historical 1-min bars through strategy.evaluate() to measure
+  signal quality before deploying changes.
+
+  Requirements:
+    - Accept symbol, start_date, end_date as CLI args
+    - Fetch historical 1-min bars from Alpaca REST API (StockBarsRequest)
+    - Feed bars chronologically to Strategy.evaluate() and RiskManager
+    - Track: signals generated, accuracy %, avg winner, avg loser, profit factor
+    - Output: JSON summary + CSV of all trades to data/backtest_{symbol}_{date}.csv
+    - Do NOT place any real orders — use a mock broker that returns fake order IDs
+
+  Usage: python src/backtest.py --symbol NVAX --start 2025-01-01 --end 2025-03-31
+
+TASK 8 — Dashboard Settings Page
+  Create: dashboard/src/pages/Settings.tsx
+  Register in App.tsx: <Route path="/settings" element={<SettingsPage />} />
+  Add nav link: { to: "/settings", label: "Settings" }
+
+  Display (read-only viewer for current bot config):
+    - Fetch: GET /api/sessions/today to show current mode (paper/live)
+    - Parse and display config/settings.yaml contents via a new API endpoint
+    - Add: GET /api/config → reads config/settings.yaml, returns as JSON
+    - Show all scanner, risk, indicator, trading, notification settings in a table
+    - Add a "Paper / Live mode" toggle that posts to /api/config/trading-mode
+      (writes TRADING_MODE to .env and logs a bot event — does NOT restart automatically)
+
+TASK 9 — Telegram Alerts Completion
+  File: bot/src/notifier.py (already scaffolded, needs testing)
+
+  Steps:
+    a) Create a Telegram bot via @BotFather → copy token to .env TELEGRAM_BOT_TOKEN
+    b) Send yourself a message via @userinfobot → copy chat ID to .env TELEGRAM_CHAT_ID
+    c) Test: python -c "from notifier import Notifier; import yaml; n=Notifier(yaml.safe_load(open('config/settings.yaml'))); n.info('Test from Trading-Bot-v2')"
+    d) Ensure notifications.telegram_enabled: true in settings.yaml
+
+TASK 10 — Production Hardening
+  Files across the project:
+
+  a) bot/src/broker.py: add retry logic for Alpaca API calls (3 retries, 1s backoff)
+     Wrap place_bracket_order, get_equity, get_positions in a retry decorator
+  b) api/src/index.ts: add request rate limiting (express-rate-limit, 100 req/min)
+  c) docker-compose.yml: add healthcheck for the bot container
+     test: ["CMD", "curl", "-f", "http://api:4000/health"]
+  d) Add Prisma migrations: cd api && npx prisma migrate dev --name init
+     This creates api/prisma/migrations/ — commit these to git
+  e) bot/src/main.py: add SIGTERM handler that closes all positions gracefully before exit
+  f) Add log rotation: bot/config/logging.yaml — keep 7 days of logs, max 50MB per file
+
+
+KNOWN ISSUES / THINGS TO VERIFY FIRST
+---------------------------------------
+1. The Alpaca WebSocket in data_feed.py uses alpaca-py StockDataStream.
+   Verify the correct import path with: python -c "from alpaca.data.live import StockDataStream"
+   If it fails, the package may need: pip install alpaca-py --upgrade
+
+2. The bot uses alpaca-py (NOT the legacy alpaca-trade-api).
+   Ensure requirements.txt has "alpaca-py>=0.20.0" (not "alpaca-trade-api").
+
+3. The Prisma schema references enums (TradeStatus, BotEventType, etc.).
+   Run "npx prisma migrate dev --name init" BEFORE first docker compose up to create migrations.
+   Without migrations, the API container will fail to start.
+
+4. pandas-ta may fail to compile on ARM64 (Raspberry Pi OS) with "cannot import ta".
+   If so, replace with: pip install ta (a lighter alternative) and update indicators.py:
+     from ta.trend import MACD, EMAIndicator
+     from ta.volume import VolumeWeightedAveragePrice
+
+5. The scanner's Finviz float scraper may be blocked if too many requests.
+   Cache aggressively (already done with self._float_cache) but also add a 1-second delay
+   between Finviz calls with: time.sleep(1) in _get_float().
+
+6. PostgreSQL volume (postgres_data) will survive docker compose down but NOT docker compose down -v.
+   NEVER run docker compose down -v in production — it deletes all trade history.
+
+
+ARCHITECTURE DECISIONS (DO NOT CHANGE WITHOUT READING THIS)
+-------------------------------------------------------------
+1. Bracket orders: The bot uses Alpaca bracket orders (entry + stop + target in ONE call).
+   This ensures the stop is ALWAYS in the market — even if the bot crashes after entry.
+   DO NOT change to separate stop orders — this is a safety feature.
+
+2. Fire-and-forget telemetry: All telemetry.py calls use background threads.
+   The trading loop must NEVER be blocked by network I/O to the API.
+   DO NOT make telemetry calls synchronous.
+
+3. A-quality signals only: The bot only trades confidence="A" signals.
+   B-quality signals are logged to telemetry for analysis but never executed.
+   DO NOT lower this gate — it will increase losses.
+
+4. Settings.yaml is the single source of truth for all parameters.
+   The config is volume-mounted into the container so changes take effect on next run.
+   DO NOT hardcode values that belong in settings.yaml.
+
+5. All times are Eastern Time (ET). Docker TZ=America/New_York.
+   APScheduler is initialized with ZoneInfo("America/New_York").
+   DO NOT use UTC times in the scheduler.
+
+
+TESTING APPROACH
+-----------------
+Before running on real paper account:
+  1. Unit test indicators: python -m pytest bot/tests/ (create tests/ folder)
+  2. Dry run: comment out broker.place_bracket_order() call in main.py,
+     let the bot log signals without placing orders for 1 full day
+  3. Check telemetry: open dashboard, verify signals/scans appear in real time
+  4. Paper trade: run with TRADING_MODE=paper for minimum 2 weeks
+  5. Validate: 100+ trades, positive expectancy (accuracy × avg_winner > avg_loser)
+  6. ONLY THEN set TRADING_MODE=live with minimum position sizes
+
+
+QUICK REFERENCE — KEY FILES
+-----------------------------
+Trading rules configuration:     bot/config/settings.yaml
+Position sizing logic:            bot/src/risk_manager.py  (calculate_shares method)
+Entry signal logic:               bot/src/strategy.py      (evaluate method)
+Exit signal logic:                bot/src/strategy.py      (should_exit method)
+Automatic order placement:        bot/src/main.py          (_on_bar method)
+Telemetry events sent:            bot/src/telemetry.py
+API real-time broadcasts:         api/src/websocket.ts     (broadcast function)
+Dashboard live updates:           dashboard/src/hooks/useWebSocket.ts
+Database schema:                  api/prisma/schema.prisma
+All service wiring:               docker-compose.yml
+Reverse proxy config:             nginx/nginx.conf
+System specification:             docs/Trading-Bot-v2-Specification.pdf
+
+
+==============================================================================
+  END OF CONTINUATION PROMPT
+  Version: 1.0 | Date: 2026-04-28
+==============================================================================

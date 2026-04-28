@@ -1,0 +1,31 @@
+# Credentials — NEVER commit
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# Bot runtime data
+bot/logs/
+bot/data/
+*.db
+
+# Node / dashboard
+node_modules/
+dist/
+.next/
+*.tsbuildinfo
+
+# Prisma generated
+api/node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docs generator (script only, not PDF)
+docs/gen_spec.py

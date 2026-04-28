@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gray-950 text-gray-100 font-sans antialiased;
+    font-family: 'Inter', sans-serif;
+  }
+  .font-mono {
+    font-family: 'JetBrains Mono', monospace;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-gray-900 border border-gray-800 rounded-xl p-5;
+  }
+  .badge-green {
+    @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-900/50 text-green-400 border border-green-800;
+  }
+  .badge-red {
+    @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-900/50 text-red-400 border border-red-800;
+  }
+  .badge-yellow {
+    @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-900/50 text-yellow-400 border border-yellow-800;
+  }
+  .badge-gray {
+    @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-800 text-gray-400 border border-gray-700;
+  }
+  .stat-label {
+    @apply text-xs text-gray-500 uppercase tracking-wider font-medium;
+  }
+  .stat-value {
+    @apply text-2xl font-bold font-mono;
+  }
+  .pnl-positive { @apply text-green-400; }
+  .pnl-negative { @apply text-red-400; }
+  .pnl-neutral  { @apply text-gray-400; }
+}
