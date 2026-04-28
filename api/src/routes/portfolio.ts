@@ -63,7 +63,7 @@ router.get("/positions", async (_req: Request, res: Response) => {
     if (!r.ok) {
       return res.status(r.status).json({ error: `Alpaca ${r.status}: ${await r.text()}` });
     }
-    const positions: any[] = await r.json();
+    const positions = (await r.json()) as any[];
     res.json(positions.map((p) => ({
       symbol: p.symbol,
       qty: parseInt(p.qty, 10),
