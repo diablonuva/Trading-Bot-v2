@@ -1,11 +1,19 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useApi } from "../hooks/useApi";
 import { useWebSocket } from "../hooks/useWebSocket";
 import StatCard from "../components/StatCard";
 import EquityChart from "../components/EquityChart";
+import MarketChart from "../components/MarketChart";
 import TradeRow from "../components/TradeRow";
 import PnlBadge from "../components/PnlBadge";
 import type { TradingSession, Trade, Position, EquitySnapshot } from "../types";
+
+const EQUITY_RANGES = [
+  { label: "1D",  days: 1 },
+  { label: "7D",  days: 7 },
+  { label: "30D", days: 30 },
+  { label: "90D", days: 90 },
+] as const;
 
 type ScanCandidate = {
   symbol: string;
@@ -27,11 +35,13 @@ function getBotStatus(session: TradingSession | null | undefined): { label: stri
 }
 
 export default function DashboardPage() {
+  const [equityRangeDays, setEquityRangeDays] = useState<number>(1);
+
   const { data: session, refetch: refetchSession } = useApi<TradingSession>("/api/sessions/today");
   const { data: trades, refetch: refetchTrades } = useApi<Trade[]>("/api/trades/today");
   const { data: positions, refetch: refetchPositions } = useApi<Position[]>("/api/positions");
   const { data: equityCurve, refetch: refetchEquity } =
-    useApi<EquitySnapshot[]>("/api/performance/equity-curve?days=1");
+    useApi<EquitySnapshot[]>(`/api/performance/equity-curve?days=${equityRangeDays}`, [equityRangeDays]);
   const { data: scanResult, refetch: refetchScan } = useApi<ScanResult>("/api/scanner/latest");
 
   const { on } = useWebSocket();
@@ -54,6 +64,25 @@ export default function DashboardPage() {
   const totalPnl = dayPnl + unrealizedTotal;
   const botStatus = getBotStatus(session);
   const watchlist = scanResult?.candidates ?? [];
+
+  // Live portfolio value: latest equity snapshot + unrealized
+  const latestEquity = equityCurve?.length
+    ? equityCurve[equityCurve.length - 1].equity
+    : session?.endingEquity ?? session?.startingEquity ?? 0;
+  const portfolioValue = latestEquity + unrealizedTotal;
+  const portfolioStartValue = equityCurve?.[0]?.equity ?? session?.startingEquity ?? portfolioValue;
+  const portfolioChange = portfolioValue - portfolioStartValue;
+  const portfolioChangePct = portfolioStartValue > 0
+    ? (portfolioChange / portfolioStartValue) * 100
+    : 0;
+
+  // Symbols available in the market chart dropdown: SPY + watchlist + open positions (deduped)
+  const chartSymbols = useMemo(() => {
+    const set = new Set<string>(["SPY", "QQQ", "IWM"]);
+    positions?.forEach((p) => set.add(p.symbol));
+    watchlist.forEach((c) => set.add(c.symbol));
+    return Array.from(set);
+  }, [positions, watchlist]);
 
   return (
     <div className="space-y-6">
@@ -99,11 +128,43 @@ export default function DashboardPage() {
         />
       </div>
 
-      {/* Equity chart */}
-      <div className="card">
-        <h2 className="text-sm font-semibold text-gray-300 mb-4">Intraday Equity</h2>
+      {/* Portfolio Value (prominent) */}
+      <div className="card bg-gradient-to-br from-gray-900 to-gray-950 border-gray-800">
+        <div className="flex items-end justify-between flex-wrap gap-4 mb-4">
+          <div>
+            <p className="stat-label">Portfolio Value</p>
+            <p className="text-4xl font-bold font-mono text-white mt-1">
+              ${portfolioValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </p>
+            <p className={`text-sm font-mono mt-1 ${portfolioChange >= 0 ? "text-green-400" : "text-red-400"}`}>
+              {portfolioChange >= 0 ? "+" : ""}${portfolioChange.toFixed(2)} ({portfolioChange >= 0 ? "+" : ""}{portfolioChangePct.toFixed(2)}%)
+              <span className="text-gray-500 ml-2 text-xs">
+                {EQUITY_RANGES.find((r) => r.days === equityRangeDays)?.label} change
+              </span>
+            </p>
+          </div>
+          <div className="flex gap-1">
+            {EQUITY_RANGES.map((r) => (
+              <button
+                key={r.label}
+                onClick={() => setEquityRangeDays(r.days)}
+                className={`text-xs px-3 py-1 rounded font-mono ${
+                  equityRangeDays === r.days
+                    ? "bg-green-700 text-white"
+                    : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                }`}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
+        </div>
         <EquityChart data={equityCurve ?? []} />
       </div>
+
+      {/* Market chart (TradingView-style candlestick) */}
+      <MarketChart defaultSymbol="SPY" symbols={chartSymbols} />
+
 
       {/* Open positions */}
       <div className="card">

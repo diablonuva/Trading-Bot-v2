@@ -14,6 +14,7 @@ import eventsRouter from "./routes/events";
 import positionsRouter from "./routes/positions";
 import telemetryRouter from "./routes/telemetry";
 import configRouter from "./routes/config";
+import marketRouter from "./routes/market";
 import { broadcastMiddleware } from "./websocket";
 
 const PORT = parseInt(process.env.PORT || "4000", 10);
@@ -44,6 +45,8 @@ async function main() {
   app.use("/telemetry", telemetryRouter);
   // Bot config (read settings.yaml + update trading mode)
   app.use("/api/config", configRouter);
+  // Market data passthrough (Alpaca bars for dashboard charts)
+  app.use("/api/market", marketRouter);
 
   const server = http.createServer(app);
 
