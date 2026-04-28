@@ -1,5 +1,6 @@
 import { Routes, Route, NavLink } from "react-router-dom";
 import { useWebSocket } from "./hooks/useWebSocket";
+import MarketClock from "./components/MarketClock";
 import DashboardPage from "./pages/Dashboard";
 import TradesPage from "./pages/Trades";
 import AnalyticsPage from "./pages/Analytics";
@@ -41,10 +42,13 @@ export default function App() {
           </NavLink>
         ))}
 
-        {/* WS status indicator */}
-        <div className="ml-auto flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${connected ? "bg-green-400 animate-pulse" : "bg-red-500"}`} />
-          <span className="text-xs text-gray-500">{connected ? "Live" : "Disconnected"}</span>
+        {/* Market clock + WS status (right-aligned, on every page) */}
+        <div className="ml-auto flex items-center gap-4">
+          <MarketClock />
+          <div className="flex items-center gap-2 pl-4 border-l border-gray-800">
+            <div className={`w-2 h-2 rounded-full ${connected ? "bg-green-400 animate-pulse" : "bg-red-500"}`} />
+            <span className="text-xs text-gray-500">{connected ? "Live" : "Disconnected"}</span>
+          </div>
         </div>
       </nav>
 
