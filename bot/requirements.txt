@@ -5,8 +5,8 @@ alpaca-py>=0.20.0
 pandas>=2.0.0
 numpy>=1.24.0
 
-# Technical indicators (VWAP, MACD, EMA, etc.)
-pandas-ta>=0.3.14b0
+# Technical indicators are implemented natively in indicators.py
+# (no external library needed — pandas-ta has no Python 3.11 release)
 
 # Scheduling (cron-style job runner within Python)
 APScheduler>=3.10.0
