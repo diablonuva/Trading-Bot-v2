@@ -40,7 +40,9 @@ class Telemetry:
 
     def session_start(self, equity: float, trading_mode: str = "paper") -> None:
         self._session_date = str(date.today())
-        self._post("/telemetry/session/start", {
+        # Synchronous so the session row exists before any subsequent event/scan
+        # is posted — otherwise the API can't link them back to the session.
+        self._post_sync("/telemetry/session/start", {
             "date": self._session_date,
             "startingEquity": equity,
             "tradingMode": trading_mode,
