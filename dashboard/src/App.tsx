@@ -1,6 +1,7 @@
 import { Routes, Route, NavLink } from "react-router-dom";
 import { useWebSocket } from "./hooks/useWebSocket";
 import MarketClock from "./components/MarketClock";
+import MobileTabBar from "./components/MobileTabBar";
 import DashboardPage from "./pages/Dashboard";
 import TradesPage from "./pages/Trades";
 import AnalyticsPage from "./pages/Analytics";
@@ -22,7 +23,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      {/* Top nav — wraps cleanly on phones; clock + Live on its own row when needed */}
+      {/* Top bar — brand + (desktop nav links) + clock + Live */}
       <nav className="bg-gray-900 border-b border-gray-800 px-3 sm:px-6 py-3 sticky top-0 z-20 backdrop-blur-sm">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           {/* Brand */}
@@ -31,8 +32,8 @@ export default function App() {
             <span className="text-gray-600 text-xs sm:text-sm">v2</span>
           </div>
 
-          {/* Nav links — horizontally scrollable on small screens */}
-          <div className="flex items-center gap-3 sm:gap-5 overflow-x-auto -mx-1 px-1 flex-1 sm:flex-none">
+          {/* Nav links — desktop/tablet only; mobile uses MobileTabBar */}
+          <div className="hidden md:flex items-center gap-3 sm:gap-5">
             {NAV_ITEMS.map(({ to, label }) => (
               <NavLink
                 key={to}
@@ -50,7 +51,7 @@ export default function App() {
           </div>
 
           {/* Market clock + WS status */}
-          <div className="flex items-center gap-3 sm:gap-4 sm:ml-auto w-full sm:w-auto justify-between sm:justify-end">
+          <div className="flex items-center gap-3 sm:gap-4 ml-auto w-full md:w-auto justify-between md:justify-end">
             <MarketClock />
             <div className="flex items-center gap-2 sm:pl-4 sm:border-l border-gray-800">
               <div className={`w-2 h-2 rounded-full ${connected ? "bg-green-400 animate-pulse" : "bg-red-500"}`} />
@@ -60,8 +61,8 @@ export default function App() {
         </div>
       </nav>
 
-      {/* Page content */}
-      <main className="flex-1 p-3 sm:p-6">
+      {/* Page content — extra bottom padding on mobile to clear the tab bar */}
+      <main className="flex-1 p-3 sm:p-6 pb-24 md:pb-6">
         <Routes>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/trades" element={<TradesPage />} />
@@ -71,6 +72,9 @@ export default function App() {
           <Route path="/settings" element={<SettingsPage />} />
         </Routes>
       </main>
+
+      {/* Mobile-only fixed bottom tab bar with icons */}
+      <MobileTabBar />
     </div>
   );
 }
