@@ -45,8 +45,24 @@ from broker import AlpacaBroker
 from data_feed import get_feed
 from notifier import Notifier
 from risk_manager import RiskManager
-from scanner import Scanner
+from scanner import CandidateStock, Scanner
 from strategy import Strategy
+from telemetry import Telemetry
+
+
+def _candidate_to_dict(c: CandidateStock, rank: int, passed: bool = True) -> dict:
+    """Convert scanner output to the API's expected /telemetry/scan shape."""
+    return {
+        "symbol": c.symbol,
+        "price": c.price,
+        "pctChange": c.pct_change,
+        "relativeVolume": c.relative_volume,
+        "floatShares": c.float_shares,
+        "hasNews": c.has_news,
+        "score": c.score,
+        "passedFilters": passed,
+        "rank": rank,
+    }
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -90,10 +106,12 @@ class TradingBot:
         self._strategy = Strategy(cfg)
         self._risk = RiskManager(cfg, self._broker)
         self._notifier = Notifier(cfg)
+        self._tel = Telemetry()
         self._feed = get_feed()
 
         self._watchlist: list[str] = []
-        self._open_positions: dict = {}  # symbol → entry_price
+        # symbol → {entry: float, trade_id: str|None, qty: int}
+        self._open_positions: dict = {}
         self._entries_allowed: bool = False
         self._session_active: bool = False
 
@@ -106,16 +124,27 @@ class TradingBot:
     def job_pre_market_scan(self) -> None:
         """06:45 — scan and build watchlist."""
         logger.info("=== PRE-MARKET SCAN STARTED ===")
+        self._tel.event("PRE_MARKET_SCAN", "Pre-market scan started")
         candidates = self._scanner.scan()
+        # Telemetry: every scan result, even when empty
+        scan_payload = [_candidate_to_dict(c, i + 1, True) for i, c in enumerate(candidates)]
+        self._tel.scan_result(scan_payload)
+
         self._watchlist = [c.symbol for c in candidates]
         if not self._watchlist:
             logger.warning("No candidates passed scanner — watchlist empty")
             self._notifier.info("Pre-market scan: no candidates found")
+            self._tel.event("SCAN_EMPTY", "Pre-market scan: 0 candidates passed filters")
             return
 
         self._feed.subscribe(self._watchlist)
         logger.info("Watchlist: %s", self._watchlist)
         self._notifier.info(f"Watchlist built: {', '.join(self._watchlist)}")
+        self._tel.event(
+            "WATCHLIST_BUILT",
+            f"Watchlist built: {len(self._watchlist)} symbols",
+            metadata={"symbols": self._watchlist},
+        )
 
     def job_session_open(self) -> None:
         """07:00 — start risk session, allow entries."""
@@ -123,27 +152,45 @@ class TradingBot:
         self._risk.start_session()
         self._entries_allowed = True
         self._session_active = True
+
+        starting_equity = self._broker.get_equity()
+        mode = os.environ.get("TRADING_MODE", "paper").lower()
+        self._tel.session_start(equity=starting_equity, trading_mode=mode)
         self._notifier.info("Trading session open — entries allowed")
 
     def job_market_open(self) -> None:
         """09:30 — market open, rescan for any new movers."""
         logger.info("=== MARKET OPEN ===")
+        self._tel.event("MARKET_OPEN", "Market open — re-scanning for new movers")
         candidates = self._scanner.scan()
+        scan_payload = [_candidate_to_dict(c, i + 1, True) for i, c in enumerate(candidates)]
+        self._tel.scan_result(scan_payload)
+
         new_symbols = [c.symbol for c in candidates if c.symbol not in self._watchlist]
         if new_symbols:
             self._watchlist.extend(new_symbols)
             self._feed.subscribe(new_symbols)
             logger.info("Added market-open movers: %s", new_symbols)
+            self._tel.event(
+                "WATCHLIST_EXTENDED",
+                f"Added {len(new_symbols)} market-open movers",
+                metadata={"symbols": new_symbols},
+            )
 
     def job_stop_entries(self) -> None:
         """11:00 — stop new entries, manage only open positions."""
         logger.info("=== NEW ENTRIES STOPPED (11:00 AM) ===")
         self._entries_allowed = False
         self._notifier.info("11:00 AM — no new entries, managing open positions only")
+        self._tel.event(
+            "ENTRIES_STOPPED",
+            "11:00 AM — no new entries, managing open positions only",
+        )
 
     def job_close_all(self) -> None:
         """12:00 — close all positions, EOD cleanup."""
         logger.info("=== END OF DAY — CLOSING ALL POSITIONS ===")
+        self._tel.event("EOD_CLOSE_ALL", "End of day — closing all positions")
         self._entries_allowed = False
         self._session_active = False
 
@@ -152,8 +199,30 @@ class TradingBot:
         self._feed.stop()
 
         summary = self._risk.daily_summary()
+        # Stamp ending equity onto the summary for the API
+        try:
+            summary["ending_equity"] = self._broker.get_equity()
+        except Exception as e:
+            logger.warning("Could not fetch ending equity: %s", e)
+
         logger.info("EOD Summary: %s", summary)
         self._notifier.eod_summary(summary)
+        self._tel.session_end(summary)
+
+    def job_equity_snapshot(self) -> None:
+        """Periodic equity snapshot during the active session (drives dashboard chart)."""
+        if not self._session_active:
+            return
+        try:
+            equity = self._broker.get_equity()
+            day_pnl = self._risk.daily_summary().get("pnl", 0.0)
+            self._tel.equity_snapshot(
+                equity=equity,
+                day_pnl=day_pnl,
+                open_position_count=len(self._open_positions),
+            )
+        except Exception as e:
+            logger.debug("Equity snapshot failed: %s", e)
 
     # ------------------------------------------------------------------
     # Bar event handler (real-time, called from DataFeed thread)
@@ -176,8 +245,20 @@ class TradingBot:
         signal = self._strategy.evaluate(symbol, df)
         if signal is None:
             return
+
+        # Skip B-quality but still record them for analysis
         if signal.confidence != "A":
             logger.debug("Skipping B-quality signal: %s %s", symbol, signal.setup)
+            self._tel.signal(
+                symbol=symbol, setup=signal.setup, confidence=signal.confidence,
+                entry_price=signal.entry_price, stop_price=signal.stop_price,
+                target_price=signal.target_price,
+                acted=False, rejection_reason="B_QUALITY",
+                vwap=getattr(signal, "vwap", None),
+                macd_line=getattr(signal, "macd_line", None),
+                rvol=getattr(signal, "rvol", None),
+                price=signal.entry_price,
+            )
             return
 
         allowed, reason = self._risk.can_enter(
@@ -185,11 +266,39 @@ class TradingBot:
         )
         if not allowed:
             logger.info("Entry blocked [%s]: %s", symbol, reason)
+            self._tel.signal(
+                symbol=symbol, setup=signal.setup, confidence=signal.confidence,
+                entry_price=signal.entry_price, stop_price=signal.stop_price,
+                target_price=signal.target_price,
+                acted=False, rejection_reason=reason,
+                vwap=getattr(signal, "vwap", None),
+                macd_line=getattr(signal, "macd_line", None),
+                rvol=getattr(signal, "rvol", None),
+                price=signal.entry_price,
+            )
             return
 
         qty = self._risk.calculate_shares(signal.entry_price, signal.stop_price)
         if qty == 0:
+            self._tel.signal(
+                symbol=symbol, setup=signal.setup, confidence=signal.confidence,
+                entry_price=signal.entry_price, stop_price=signal.stop_price,
+                target_price=signal.target_price,
+                acted=False, rejection_reason="ZERO_QTY",
+            )
             return
+
+        # Record the signal as acted=True FIRST so we can link the trade to it
+        signal_id = self._tel.signal(
+            symbol=symbol, setup=signal.setup, confidence=signal.confidence,
+            entry_price=signal.entry_price, stop_price=signal.stop_price,
+            target_price=signal.target_price,
+            acted=True,
+            vwap=getattr(signal, "vwap", None),
+            macd_line=getattr(signal, "macd_line", None),
+            rvol=getattr(signal, "rvol", None),
+            price=signal.entry_price,
+        )
 
         try:
             order = self._broker.place_bracket_order(
@@ -198,7 +307,25 @@ class TradingBot:
                 stop_price=signal.stop_price,
                 target_price=signal.target_price,
             )
-            self._open_positions[symbol] = signal.entry_price
+            order_id = getattr(order, "id", None)
+
+            trade_id = self._tel.trade_entry(
+                symbol=symbol, setup=signal.setup, qty=qty,
+                entry_price=signal.entry_price,
+                stop_price=signal.stop_price,
+                target_price=signal.target_price,
+                order_id=str(order_id) if order_id else None,
+                vwap=getattr(signal, "vwap", None),
+                macd=getattr(signal, "macd_line", None),
+                rvol=getattr(signal, "rvol", None),
+                signal_id=signal_id,
+            )
+
+            self._open_positions[symbol] = {
+                "entry": signal.entry_price,
+                "trade_id": trade_id,
+                "qty": qty,
+            }
             self._notifier.trade_entry(
                 symbol, signal.setup, qty,
                 signal.entry_price, signal.stop_price, signal.target_price,
@@ -210,13 +337,15 @@ class TradingBot:
             )
         except Exception as e:
             logger.error("Order failed for %s: %s", symbol, e)
+            self._tel.error(f"Order failed for {symbol}: {e}")
 
     def _monitor_open_position(self, symbol: str, df) -> None:
         """Check soft exit conditions for open positions."""
         if symbol not in self._open_positions:
             return
 
-        entry = self._open_positions[symbol]
+        record = self._open_positions[symbol]
+        entry = record["entry"]
         should_exit, reason = self._strategy.should_exit(symbol, df, entry, 0)
 
         if should_exit:
@@ -235,6 +364,13 @@ class TradingBot:
             self._risk.record_trade(symbol, entry, exit_price, qty, "buy")
             self._notifier.trade_exit(symbol, qty, exit_price, pnl, reason)
 
+            if record.get("trade_id"):
+                self._tel.trade_exit(
+                    trade_id=record["trade_id"],
+                    exit_price=exit_price,
+                    exit_reason=reason,
+                )
+
             logger.info(
                 "SOFT EXIT: %s x%d @ %.2f | pnl=%.2f | reason=%s",
                 symbol, qty, exit_price, pnl, reason,
@@ -245,6 +381,11 @@ class TradingBot:
                     self._risk.daily_summary()["pnl"],
                     "daily loss limit reached",
                 )
+                self._tel.event(
+                    "DAILY_HALT",
+                    f"Daily halt — P&L ${self._risk.daily_summary()['pnl']:+.2f}",
+                    severity="WARNING",
+                )
 
     # ------------------------------------------------------------------
     # Run
@@ -253,6 +394,16 @@ class TradingBot:
     def run(self) -> None:
         logger.info("Trading bot starting...")
         self._notifier.info("Trading bot starting")
+
+        # Open a session record now so the 06:45 pre-market scan has somewhere
+        # to write to. The 07:00 session_open job will upsert with fresh equity.
+        try:
+            startup_equity = self._broker.get_equity()
+            mode = os.environ.get("TRADING_MODE", "paper").lower()
+            self._tel.session_start(equity=startup_equity, trading_mode=mode)
+            logger.info("Telemetry session opened (equity=%.2f, mode=%s)", startup_equity, mode)
+        except Exception as e:
+            logger.warning("Could not open telemetry session at startup: %s", e)
 
         scheduler = BackgroundScheduler(timezone=ET)
 
@@ -279,6 +430,12 @@ class TradingBot:
                           minute="*/1",
                           hour="7-11",
                           id="periodic_rescan")
+
+        # Equity snapshot every minute during the active session — drives the dashboard chart
+        scheduler.add_job(self.job_equity_snapshot, "cron",
+                          minute="*/1",
+                          hour="7-12",
+                          id="equity_snapshot")
 
         scheduler.start()
         self._feed.start()
