@@ -524,6 +524,13 @@ class TradingBot:
         except Exception as e:
             logger.warning("Could not resurrect open positions: %s", e)
 
+        # If we're starting up mid-session (e.g. Docker restarted us at 11:30
+        # ET because of a crash), the 07:00 job_session_open has already
+        # passed for today. Without bootstrapping, _session_active stays False
+        # and the periodic_rescan / equity_snapshot jobs early-exit forever
+        # until the next morning's session_open. Run the catch-up jobs now.
+        self._bootstrap_session_state()
+
         scheduler = BackgroundScheduler(timezone=ET)
 
         # All sessions jobs run Mon-Fri only. Holiday dates are filtered
@@ -591,6 +598,49 @@ class TradingBot:
             scheduler.shutdown()
             self._feed.stop()
             logger.info("Bot stopped cleanly")
+
+    def _bootstrap_session_state(self) -> None:
+        """When the bot starts up inside the trading window, run the catch-up
+        jobs to bring _session_active / _entries_allowed / _watchlist up to date.
+        Without this, periodic_rescan and equity_snapshot early-exit because
+        _session_active is False until the next morning's job_session_open."""
+        if _is_market_holiday_today():
+            return
+        now_et = datetime.now(ET)
+        if now_et.weekday() >= 5:  # Sat/Sun
+            return
+
+        t = self._t
+        def _at(hh_mm: str) -> datetime:
+            h, m = hh_mm.split(":")
+            return now_et.replace(hour=int(h), minute=int(m), second=0, microsecond=0)
+
+        session_open_t = _at(t["trading_start_time"])
+        stop_entries_t = _at(t["stop_entries_time"])
+        close_all_t    = _at(t["close_all_time"])
+
+        if now_et < session_open_t:
+            return  # too early — scheduler will fire on time
+        if now_et >= close_all_t:
+            return  # too late — today's session is already over
+
+        logger.info("Bootstrap: starting mid-session, running catch-up jobs")
+        try:
+            self.job_session_open()
+        except Exception as e:
+            logger.warning("Bootstrap session_open failed: %s", e)
+
+        # Run a pre-market scan now since we missed the 06:45 firing
+        if not self._watchlist:
+            try:
+                self.job_pre_market_scan()
+            except Exception as e:
+                logger.warning("Bootstrap pre_market_scan failed: %s", e)
+
+        # If we're past 15:00 ET (stop entries), mirror that state
+        if now_et >= stop_entries_t:
+            self._entries_allowed = False
+            logger.info("Bootstrap: past stop_entries — blocking new entries")
 
     def _periodic_rescan(self) -> None:
         """Minute-level rescan to catch new movers that emerged during session."""
