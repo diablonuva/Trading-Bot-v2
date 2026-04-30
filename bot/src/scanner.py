@@ -257,6 +257,16 @@ class Scanner:
         candidates.sort(key=lambda c: c.score, reverse=True)
         watchlist = candidates[: self._cfg["scanner"]["watchlist_size"]]
 
+        # Final filter: drop symbols where IEX has no recent minute bars.
+        # Free-tier IEX feed misses many sub-200M-float symbols (especially
+        # SPAC units like ANSCU) — without bars the strategy can't evaluate,
+        # so they shouldn't be on the watchlist or appear in dashboard
+        # telemetry as 'passing'. The full universe of candidates remains
+        # available in self._last_near_misses for visibility.
+        if watchlist:
+            watchlist = self._filter_by_iex_coverage(watchlist)
+            stats.passed = len(watchlist)
+
         logger.info(
             "Scan complete: %d passed, top %d selected (universe=%d, "
             "evaluated=%d, deep=%d, no_prev=%d, build_fail=%d, "
@@ -487,6 +497,44 @@ class Scanner:
             pass
 
         return {}
+
+    def _filter_by_iex_coverage(self, candidates: list[CandidateStock]) -> list[CandidateStock]:
+        """Drop candidates that have no recent IEX minute bars.
+
+        Free-tier IEX feed only sees IEX-routed trades. Many low-float
+        symbols (especially SPAC units, OTC-leaning small caps) trade
+        almost entirely on Cboe BZX, ARCA, or Nasdaq direct — IEX sees
+        nothing for them, so the data feed can't dispatch bars to the
+        strategy. Filtering them out at scanner-time keeps the dashboard
+        watchlist accurate (only shows symbols the bot can actually
+        evaluate) and is cheap — one batched bars call for the top-N
+        candidates already filtered down by the 5-pillar gates.
+        """
+        if not candidates:
+            return candidates
+        from datetime import datetime, timedelta, timezone
+        symbols = [c.symbol for c in candidates]
+        start = datetime.now(timezone.utc) - timedelta(minutes=10)
+        try:
+            req = StockBarsRequest(
+                symbol_or_symbols=symbols,
+                timeframe=TimeFrame.Minute,
+                start=start,
+                feed="iex",
+            )
+            result = self._data.get_stock_bars(req)
+            bars_map = Scanner._barset_to_dict(result)
+        except Exception as e:
+            logger.warning("IEX coverage check failed: %s — keeping all candidates", e)
+            return candidates  # fail-open: subscribe() will catch it
+
+        accepted: list[CandidateStock] = []
+        for c in candidates:
+            if bars_map.get(c.symbol):
+                accepted.append(c)
+            else:
+                logger.info("Scanner: dropping %s (no IEX bar coverage)", c.symbol)
+        return accepted
 
     def _get_avg_daily_volume(self, symbol: str) -> float:
         """50-day avg volume. Reads from the cache populated by
