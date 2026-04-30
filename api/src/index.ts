@@ -29,11 +29,20 @@ async function main() {
   app.use(cors({ origin: "*" }));
   app.use(express.json({ limit: "2mb" }));
 
-  // Rate limit: 100 requests per minute per IP
-  app.use(rateLimit({ windowMs: 60_000, max: 100, standardHeaders: true, legacyHeaders: false }));
-
-  // Health check (used by Docker healthcheck + nginx upstream check)
+  // Health check (used by Docker healthcheck + nginx upstream check) — no rate limit
   app.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now() }));
+
+  // Rate limit ONLY the public /api/* surface. /telemetry/* is the bot
+  // posting from inside the Docker network — it bursts during active sessions
+  // (per-bar gate_checks, signals, equity snapshots) and would otherwise hit
+  // the limit and have events silently dropped.
+  const publicLimiter = rateLimit({
+    windowMs: 60_000,
+    max: 600,                    // 10 req/sec is plenty for the dashboard
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
+  app.use("/api", publicLimiter);
 
   // API routes
   app.use("/api/trades", tradesRouter);

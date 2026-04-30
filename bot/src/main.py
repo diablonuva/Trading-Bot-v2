@@ -91,6 +91,30 @@ logger = logging.getLogger("main")
 
 ET = ZoneInfo("America/New_York")
 
+# NYSE full-closure holidays for the next two years. Mirrors the dashboard's
+# MarketClock list. Extend yearly. Early-close days (Black Friday, Christmas
+# Eve) are NOT tracked — bot scans/closes on those days as usual but the
+# 12:00 ET close-all happens before the 13:00 early close anyway.
+NYSE_HOLIDAYS: set[str] = {
+    # 2026
+    "2026-01-01", "2026-01-19", "2026-02-16", "2026-04-03",
+    "2026-05-25", "2026-06-19", "2026-07-03", "2026-09-07",
+    "2026-11-26", "2026-12-25",
+    # 2027
+    "2027-01-01", "2027-01-18", "2027-02-15", "2027-03-26",
+    "2027-05-31", "2027-06-18", "2027-07-05", "2027-09-06",
+    "2027-11-25", "2027-12-24",
+    # 2028
+    "2028-01-17", "2028-02-21", "2028-04-14", "2028-05-29",
+    "2028-06-19", "2028-07-04", "2028-09-04", "2028-11-23",
+    "2028-12-25",
+}
+
+
+def _is_market_holiday_today() -> bool:
+    today_et = datetime.now(ET).date().isoformat()
+    return today_et in NYSE_HOLIDAYS
+
 
 # ---------------------------------------------------------------------------
 # Bot orchestrator
@@ -123,6 +147,9 @@ class TradingBot:
 
     def job_pre_market_scan(self) -> None:
         """06:45 — scan and build watchlist."""
+        if _is_market_holiday_today():
+            logger.info("Skipping pre-market scan — NYSE holiday")
+            return
         logger.info("=== PRE-MARKET SCAN STARTED ===")
         self._tel.event("PRE_MARKET_SCAN", "Pre-market scan started")
         candidates = self._scanner.scan()
@@ -158,6 +185,9 @@ class TradingBot:
 
     def job_session_open(self) -> None:
         """07:00 — start risk session, allow entries."""
+        if _is_market_holiday_today():
+            logger.info("Skipping session open — NYSE holiday")
+            return
         logger.info("=== TRADING SESSION OPEN ===")
         self._risk.start_session()
         self._entries_allowed = True
@@ -170,6 +200,8 @@ class TradingBot:
 
     def job_market_open(self) -> None:
         """09:30 — market open, rescan for any new movers."""
+        if _is_market_holiday_today():
+            return
         logger.info("=== MARKET OPEN ===")
         self._tel.event("MARKET_OPEN", "Market open — re-scanning for new movers")
         candidates = self._scanner.scan()
@@ -199,6 +231,8 @@ class TradingBot:
 
     def job_stop_entries(self) -> None:
         """11:00 — stop new entries, manage only open positions."""
+        if _is_market_holiday_today():
+            return
         logger.info("=== NEW ENTRIES STOPPED (11:00 AM) ===")
         self._entries_allowed = False
         self._notifier.info("11:00 AM — no new entries, managing open positions only")
@@ -209,6 +243,8 @@ class TradingBot:
 
     def job_close_all(self) -> None:
         """12:00 — close all positions, EOD cleanup."""
+        if _is_market_holiday_today():
+            return
         logger.info("=== END OF DAY — CLOSING ALL POSITIONS ===")
         self._tel.event("EOD_CLOSE_ALL", "End of day — closing all positions")
         self._entries_allowed = False
@@ -437,36 +473,62 @@ class TradingBot:
         except Exception as e:
             logger.warning("Could not open telemetry session at startup: %s", e)
 
+        # Restart-safety: if Docker restarted us mid-session and Alpaca
+        # already has open positions, resurrect them into self._open_positions
+        # so the soft-exit monitor and trade_exit telemetry work for them.
+        # The bracket order on Alpaca's side keeps the hard stop in place.
+        try:
+            existing = self._broker.get_positions()
+            for symbol, position in existing.items():
+                qty = int(position.qty)
+                entry = float(position.avg_entry_price)
+                self._open_positions[symbol] = {
+                    "entry": entry,
+                    "trade_id": None,   # not linked to a DB row from this session
+                    "qty": qty,
+                }
+                logger.info("Resurrected position from Alpaca: %s x%d @ %.2f", symbol, qty, entry)
+            if existing:
+                # Subscribe the data feed to these symbols so soft-exit logic fires
+                self._watchlist = list(existing.keys())
+                self._feed.subscribe(self._watchlist)
+                self._notifier.info(f"Resurrected {len(existing)} position(s) on startup: {', '.join(existing.keys())}")
+        except Exception as e:
+            logger.warning("Could not resurrect open positions: %s", e)
+
         scheduler = BackgroundScheduler(timezone=ET)
 
+        # All sessions jobs run Mon-Fri only. Holiday dates are filtered
+        # at the top of each job_* function via _is_market_holiday_today().
         t = self._t
+        wkd = "mon-fri"
         scheduler.add_job(self.job_pre_market_scan, "cron",
-                          hour=6, minute=45, id="pre_market_scan")
+                          hour=6, minute=45, day_of_week=wkd,
+                          id="pre_market_scan")
         scheduler.add_job(self.job_session_open, "cron",
                           hour=int(t["trading_start_time"].split(":")[0]),
                           minute=int(t["trading_start_time"].split(":")[1]),
-                          id="session_open")
+                          day_of_week=wkd, id="session_open")
         scheduler.add_job(self.job_market_open, "cron",
-                          hour=9, minute=30, id="market_open")
+                          hour=9, minute=30, day_of_week=wkd,
+                          id="market_open")
         scheduler.add_job(self.job_stop_entries, "cron",
                           hour=int(t["stop_entries_time"].split(":")[0]),
                           minute=int(t["stop_entries_time"].split(":")[1]),
-                          id="stop_entries")
+                          day_of_week=wkd, id="stop_entries")
         scheduler.add_job(self.job_close_all, "cron",
                           hour=int(t["close_all_time"].split(":")[0]),
                           minute=int(t["close_all_time"].split(":")[1]),
-                          id="close_all")
+                          day_of_week=wkd, id="close_all")
 
         # Re-scan every minute during active session to catch new movers
         scheduler.add_job(self._periodic_rescan, "cron",
-                          minute="*/1",
-                          hour="7-11",
+                          minute="*/1", hour="7-11", day_of_week=wkd,
                           id="periodic_rescan")
 
         # Equity snapshot every minute during the active session — drives the dashboard chart
         scheduler.add_job(self.job_equity_snapshot, "cron",
-                          minute="*/1",
-                          hour="7-12",
+                          minute="*/1", hour="7-12", day_of_week=wkd,
                           id="equity_snapshot")
 
         scheduler.start()

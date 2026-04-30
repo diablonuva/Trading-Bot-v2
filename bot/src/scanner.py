@@ -25,6 +25,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Optional
 
 import requests
@@ -110,6 +111,10 @@ class Scanner:
         self._data = StockHistoricalDataClient(api_key, secret_key)
         self._trading = TradingClient(api_key, secret_key, paper=paper)
         self._float_cache: dict[str, Optional[float]] = {}
+        # Date the float cache was populated. Cleared at the start of each
+        # new trading day so floats are re-fetched (companies issue secondary
+        # offerings, do reverse splits, etc.).
+        self._float_cache_date: Optional[date] = None
         self._last_stats: ScanStats = ScanStats()
 
     def last_stats(self) -> ScanStats:
@@ -297,6 +302,12 @@ class Scanner:
         Returns None on failure — filter is skipped for that symbol.
         Cached per session to avoid hammering the endpoint.
         """
+        # Clear cache once per calendar day so floats stay current
+        today = date.today()
+        if self._float_cache_date != today:
+            self._float_cache.clear()
+            self._float_cache_date = today
+
         if symbol in self._float_cache:
             return self._float_cache[symbol]
 
