@@ -43,6 +43,14 @@ const EventsIcon = ({ className }: IconProps) => (
   </svg>
 );
 
+const ScannerIcon = ({ className }: IconProps) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+    strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <circle cx="11" cy="11" r="7" />
+    <path d="M21 21l-4.3-4.3" />
+  </svg>
+);
+
 const SettingsIcon = ({ className }: IconProps) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
     strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -55,6 +63,7 @@ const TABS = [
   { to: "/",          label: "Home",     icon: HomeIcon },
   { to: "/trades",    label: "Trades",   icon: TradesIcon },
   { to: "/signals",   label: "Signals",  icon: SignalsIcon },
+  { to: "/scanner",   label: "Scanner",  icon: ScannerIcon },
   { to: "/analytics", label: "Stats",    icon: AnalyticsIcon },
   { to: "/events",    label: "Events",   icon: EventsIcon },
   { to: "/settings",  label: "Settings", icon: SettingsIcon },

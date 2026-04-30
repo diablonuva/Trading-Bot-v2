@@ -6,6 +6,7 @@ import DashboardPage from "./pages/Dashboard";
 import TradesPage from "./pages/Trades";
 import AnalyticsPage from "./pages/Analytics";
 import SignalsPage from "./pages/Signals";
+import ScannerPage from "./pages/Scanner";
 import EventsPage from "./pages/Events";
 import SettingsPage from "./pages/Settings";
 
@@ -13,6 +14,7 @@ const NAV_ITEMS = [
   { to: "/", label: "Dashboard" },
   { to: "/trades", label: "Trades" },
   { to: "/signals", label: "Signals" },
+  { to: "/scanner", label: "Scanner" },
   { to: "/analytics", label: "Analytics" },
   { to: "/events", label: "Events" },
   { to: "/settings", label: "Settings" },
@@ -67,6 +69,7 @@ export default function App() {
           <Route path="/" element={<DashboardPage />} />
           <Route path="/trades" element={<TradesPage />} />
           <Route path="/signals" element={<SignalsPage />} />
+          <Route path="/scanner" element={<ScannerPage />} />
           <Route path="/analytics" element={<AnalyticsPage />} />
           <Route path="/events" element={<EventsPage />} />
           <Route path="/settings" element={<SettingsPage />} />

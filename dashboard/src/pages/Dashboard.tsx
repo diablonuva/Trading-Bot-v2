@@ -60,25 +60,8 @@ type ScanCandidate = {
 };
 
 type ScanResult = {
-  scannedAt: string;
-  candidatesFound: number;
   candidates: ScanCandidate[];
-  universeSize?: number | null;
-  evaluated?: number | null;
-  rejectedPrice?: number | null;
-  rejectedPct?: number | null;
-  rejectedRvol?: number | null;
-  rejectedFloat?: number | null;
-  durationMs?: number | null;
 };
-
-function relativeAge(ts: string): string {
-  const ms = Date.now() - new Date(ts).getTime();
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s ago`;
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-  return `${Math.floor(s / 3600)}h ago`;
-}
 
 function getBotStatus(session: TradingSession | null | undefined): { label: string; color: string } {
   if (!session) return { label: "INACTIVE", color: "gray" };
@@ -346,88 +329,6 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* Scanner Watchlist */}
-      <div className="card">
-        <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
-          <h2 className="text-sm font-semibold text-gray-300">
-            Scanner Watchlist
-            <span className="ml-2 badge-yellow">{watchlist.length}</span>
-          </h2>
-          {scanResult?.scannedAt && (
-            <span className="text-[10px] sm:text-xs text-gray-500 font-mono">
-              Last scan {new Date(scanResult.scannedAt).toLocaleTimeString("en-GB", {
-                timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", second: "2-digit",
-              })} ET · {relativeAge(scanResult.scannedAt)}
-            </span>
-          )}
-        </div>
-
-        {/* Last-scan stats line — present once stats are persisted server-side */}
-        {scanResult && (scanResult.universeSize ?? null) !== null && (
-          <div className="text-[11px] sm:text-xs text-gray-400 mb-3 flex flex-wrap gap-x-4 gap-y-1">
-            <span>
-              <span className="text-gray-500">Universe</span>{" "}
-              <span className="font-mono text-gray-200">{scanResult.universeSize?.toLocaleString()}</span>
-            </span>
-            <span>
-              <span className="text-gray-500">Evaluated</span>{" "}
-              <span className="font-mono text-gray-200">{scanResult.evaluated?.toLocaleString() ?? "—"}</span>
-            </span>
-            <span>
-              <span className="text-gray-500">Passed</span>{" "}
-              <span className="font-mono text-green-400">{scanResult.candidatesFound}</span>
-            </span>
-            <span>
-              <span className="text-gray-500">Rejected</span>{" "}
-              <span className="font-mono text-gray-300">
-                price <span className="text-red-400">{scanResult.rejectedPrice ?? 0}</span> ·{" "}
-                pct <span className="text-red-400">{scanResult.rejectedPct ?? 0}</span> ·{" "}
-                rvol <span className="text-red-400">{scanResult.rejectedRvol ?? 0}</span> ·{" "}
-                float <span className="text-red-400">{scanResult.rejectedFloat ?? 0}</span>
-              </span>
-            </span>
-            {scanResult.durationMs != null && (
-              <span>
-                <span className="text-gray-500">Took</span>{" "}
-                <span className="font-mono text-gray-300">
-                  {scanResult.durationMs < 1000
-                    ? `${scanResult.durationMs}ms`
-                    : `${(scanResult.durationMs / 1000).toFixed(1)}s`}
-                </span>
-              </span>
-            )}
-          </div>
-        )}
-
-        {!watchlist.length ? (
-          <p className="text-gray-600 text-sm">No scan results yet</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-gray-500 text-xs uppercase tracking-wider border-b border-gray-800">
-                  <th className="py-2 px-3">Symbol</th>
-                  <th className="py-2 px-3">% Change</th>
-                  <th className="py-2 px-3">Rel Vol</th>
-                  <th className="py-2 px-3">News</th>
-                  <th className="py-2 px-3">Score</th>
-                </tr>
-              </thead>
-              <tbody>
-                {watchlist.map((c) => (
-                  <tr key={c.symbol} className="border-b border-gray-800 hover:bg-gray-800/50">
-                    <td className="py-2 px-3 font-mono font-bold text-white">{c.symbol}</td>
-                    <td className="py-2 px-3 text-green-400">+{c.pctChange.toFixed(1)}%</td>
-                    <td className="py-2 px-3 text-gray-300">{c.relativeVolume.toFixed(1)}x</td>
-                    <td className="py-2 px-3">{c.hasNews ? <span className="badge-green">Yes</span> : <span className="badge-gray">No</span>}</td>
-                    <td className="py-2 px-3 text-yellow-400 font-mono">{c.score.toFixed(1)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
     </div>
   );
 }
