@@ -121,6 +121,11 @@ class Scanner:
         # new trading day so floats are re-fetched (companies issue secondary
         # offerings, do reverse splits, etc.).
         self._float_cache_date: Optional[date] = None
+        # 50-day avg volume — also cached per day. Avoids 50+ Alpaca bar
+        # fetches per scan when the same survivor list is rescanned every
+        # minute during the active session.
+        self._avg_vol_cache: dict[str, float] = {}
+        self._avg_vol_cache_date: Optional[date] = None
         self._last_stats: ScanStats = ScanStats()
         # Top near-misses from the last scan. Each carries a `_failed_pillar`
         # tag so the dashboard can show why each one didn't make the watchlist.
@@ -160,9 +165,33 @@ class Scanner:
             self._last_stats = stats
             return []
 
+        # Cheap pre-filter on % change before the expensive per-symbol API
+        # calls in _build_candidate (avg_daily_volume, news, float). Without
+        # this, every scan hits Alpaca ~3700+ times and runs 1-2 minutes —
+        # APScheduler then drops the next minute's tick. Keep candidates
+        # within 50% of the pct_change threshold so near-misses on pct are
+        # still captured (a 9.2% mover passes a 10% min × 0.5 = 5% floor).
+        pct_min = self._cfg["scanner"]["pct_change_min"]
+        pct_floor = pct_min * 0.5
+        deep_eval: dict = {}
+        for symbol, snap in snapshots.items():
+            try:
+                if snap.daily_bar is None or snap.prev_daily_bar is None:
+                    continue
+                prev_close = float(snap.prev_daily_bar.close)
+                if prev_close <= 0:
+                    continue
+                pct = ((float(snap.daily_bar.close) - prev_close) / prev_close) * 100
+                if pct < pct_floor:
+                    stats.rejected_pct += 1
+                    continue
+                deep_eval[symbol] = snap
+            except Exception:
+                continue
+
         candidates = []
         near_misses: list[CandidateStock] = []
-        for symbol, snap in snapshots.items():
+        for symbol, snap in deep_eval.items():
             candidate = self._build_candidate(symbol, snap)
             if candidate is None:
                 continue
@@ -307,7 +336,15 @@ class Scanner:
             return None
 
     def _get_avg_daily_volume(self, symbol: str) -> float:
-        """50-day average daily volume."""
+        """50-day average daily volume. Cached per calendar day."""
+        today = date.today()
+        if self._avg_vol_cache_date != today:
+            self._avg_vol_cache.clear()
+            self._avg_vol_cache_date = today
+
+        if symbol in self._avg_vol_cache:
+            return self._avg_vol_cache[symbol]
+
         try:
             req = StockBarsRequest(
                 symbol_or_symbols=symbol,
@@ -316,11 +353,15 @@ class Scanner:
             )
             bars = self._data.get_stock_bars(req)[symbol]
             if len(bars) < 5:
+                self._avg_vol_cache[symbol] = 0.0
                 return 0.0
             vols = [float(b.volume) for b in bars[:-1]]  # exclude today
-            return sum(vols) / len(vols)
+            avg = sum(vols) / len(vols)
+            self._avg_vol_cache[symbol] = avg
+            return avg
         except Exception as e:
             logger.debug("Avg volume fetch failed for %s: %s", symbol, e)
+            self._avg_vol_cache[symbol] = 0.0
             return 0.0
 
     def _get_float(self, symbol: str) -> Optional[float]:
