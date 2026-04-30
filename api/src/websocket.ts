@@ -11,7 +11,8 @@ export type WsEventType =
   | "bot_event"
   | "session_start"
   | "session_end"
-  | "daily_halt";
+  | "daily_halt"
+  | "gate_check";
 
 export function broadcast(wss: WebSocketServer, type: WsEventType, data: unknown) {
   const payload = JSON.stringify({ type, data, ts: Date.now() });
