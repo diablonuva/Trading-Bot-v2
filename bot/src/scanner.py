@@ -166,20 +166,21 @@ class Scanner:
             return []
 
         # Cheap pre-filter on % change before the expensive per-symbol API
-        # calls in _build_candidate (avg_daily_volume, news, float). Without
-        # this, every scan hits Alpaca ~3700+ times and runs 1-2 minutes —
-        # APScheduler then drops the next minute's tick. Keep candidates
-        # within 50% of the pct_change threshold so near-misses on pct are
-        # still captured (a 9.2% mover passes a 10% min × 0.5 = 5% floor).
+        # calls in _build_candidate. Keep candidates within 50% of the
+        # pct_change threshold so near-misses on pct are still captured (a
+        # 9.2% mover passes a 10% × 0.5 = 5% floor).
         pct_min = self._cfg["scanner"]["pct_change_min"]
         pct_floor = pct_min * 0.5
         deep_eval: dict = {}
+        skipped_no_prev = 0  # symbols missing prev_daily_bar (no pct calc possible)
         for symbol, snap in snapshots.items():
             try:
                 if snap.daily_bar is None or snap.prev_daily_bar is None:
+                    skipped_no_prev += 1
                     continue
                 prev_close = float(snap.prev_daily_bar.close)
                 if prev_close <= 0:
+                    skipped_no_prev += 1
                     continue
                 pct = ((float(snap.daily_bar.close) - prev_close) / prev_close) * 100
                 if pct < pct_floor:
@@ -189,11 +190,26 @@ class Scanner:
             except Exception:
                 continue
 
+        if skipped_no_prev:
+            logger.info("Skipped %d symbols with no prev_daily_bar", skipped_no_prev)
+
+        # Pre-populate avg-vol cache for all survivors in a few batched calls
+        # rather than 50+ sequential ones inside the candidate loop.
+        if deep_eval:
+            t_avg = time.time()
+            self._batch_avg_daily_volume(list(deep_eval.keys()))
+            logger.info(
+                "Batched avg-vol fetched for %d symbols in %dms",
+                len(deep_eval), int((time.time() - t_avg) * 1000),
+            )
+
         candidates = []
         near_misses: list[CandidateStock] = []
+        build_failed = 0  # _build_candidate returned None despite passing pre-filter
         for symbol, snap in deep_eval.items():
             candidate = self._build_candidate(symbol, snap)
             if candidate is None:
+                build_failed += 1
                 continue
             fails = candidate.all_failures(self._cfg)
             if not fails:
@@ -231,10 +247,12 @@ class Scanner:
         watchlist = candidates[: self._cfg["scanner"]["watchlist_size"]]
 
         logger.info(
-            "Scan complete: %d passed filters, top %d selected (universe=%d, "
-            "evaluated=%d, rejected price=%d pct=%d rvol=%d float=%d, %dms)",
+            "Scan complete: %d passed, top %d selected (universe=%d, "
+            "evaluated=%d, deep=%d, no_prev=%d, build_fail=%d, "
+            "rejected price=%d pct=%d rvol=%d float=%d, %dms)",
             len(candidates), len(watchlist),
-            stats.universe_size, stats.evaluated,
+            stats.universe_size, stats.evaluated, len(deep_eval),
+            skipped_no_prev, build_failed,
             stats.rejected_price, stats.rejected_pct,
             stats.rejected_rvol, stats.rejected_float,
             stats.duration_ms,
@@ -335,34 +353,54 @@ class Scanner:
             logger.debug("Could not build candidate %s: %s", symbol, e)
             return None
 
-    def _get_avg_daily_volume(self, symbol: str) -> float:
-        """50-day average daily volume. Cached per calendar day."""
+    def _ensure_avg_vol_day(self) -> None:
         today = date.today()
         if self._avg_vol_cache_date != today:
             self._avg_vol_cache.clear()
             self._avg_vol_cache_date = today
 
+    def _batch_avg_daily_volume(self, symbols: list[str]) -> None:
+        """Pre-populate self._avg_vol_cache for many symbols in one call.
+        Alpaca accepts a list of symbols on get_stock_bars; limit=55 applies
+        per symbol. Cuts scan time from ~100s to ~5-10s on the first scan."""
+        self._ensure_avg_vol_day()
+        to_fetch = [s for s in symbols if s not in self._avg_vol_cache]
+        if not to_fetch:
+            return
+
+        BATCH = 100  # Alpaca recommends staying under a few hundred per request
+        for i in range(0, len(to_fetch), BATCH):
+            batch = to_fetch[i:i + BATCH]
+            try:
+                req = StockBarsRequest(
+                    symbol_or_symbols=batch,
+                    timeframe=TimeFrame.Day,
+                    limit=55,
+                )
+                result = self._data.get_stock_bars(req)
+                for sym in batch:
+                    bars = result.get(sym, [])
+                    if len(bars) < 5:
+                        self._avg_vol_cache[sym] = 0.0
+                    else:
+                        vols = [float(b.volume) for b in bars[:-1]]
+                        self._avg_vol_cache[sym] = sum(vols) / len(vols)
+            except Exception as e:
+                logger.warning("Batch avg-vol fetch failed (offset %d): %s", i, e)
+                for sym in batch:
+                    self._avg_vol_cache.setdefault(sym, 0.0)
+
+    def _get_avg_daily_volume(self, symbol: str) -> float:
+        """50-day avg volume. Reads from the cache populated by
+        _batch_avg_daily_volume. Falls back to a single fetch if not
+        pre-populated (e.g. when called outside scan()).
+        """
+        self._ensure_avg_vol_day()
         if symbol in self._avg_vol_cache:
             return self._avg_vol_cache[symbol]
-
-        try:
-            req = StockBarsRequest(
-                symbol_or_symbols=symbol,
-                timeframe=TimeFrame.Day,
-                limit=55,
-            )
-            bars = self._data.get_stock_bars(req)[symbol]
-            if len(bars) < 5:
-                self._avg_vol_cache[symbol] = 0.0
-                return 0.0
-            vols = [float(b.volume) for b in bars[:-1]]  # exclude today
-            avg = sum(vols) / len(vols)
-            self._avg_vol_cache[symbol] = avg
-            return avg
-        except Exception as e:
-            logger.debug("Avg volume fetch failed for %s: %s", symbol, e)
-            self._avg_vol_cache[symbol] = 0.0
-            return 0.0
+        # Fallback: single fetch (shouldn't happen during scan() now)
+        self._batch_avg_daily_volume([symbol])
+        return self._avg_vol_cache.get(symbol, 0.0)
 
     def _get_float(self, symbol: str) -> Optional[float]:
         """
