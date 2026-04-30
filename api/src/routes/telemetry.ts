@@ -189,7 +189,7 @@ router.post("/signal", async (req: Request, res: Response) => {
 // Scanner result
 // ----------------------------------------------------------------
 router.post("/scan", async (req: Request, res: Response) => {
-  const { sessionDate, candidates } = req.body;
+  const { sessionDate, candidates, stats } = req.body;
   try {
     const session = await prisma.tradingSession.findUnique({
       where: { date: new Date(sessionDate) },
@@ -197,10 +197,18 @@ router.post("/scan", async (req: Request, res: Response) => {
     if (!session) return res.status(404).json({ error: "Session not found" });
 
     const passed = candidates.filter((c: any) => c.passedFilters);
+    const s = stats ?? {};
     const scanResult = await prisma.scanResult.create({
       data: {
         sessionId: session.id,
         candidatesFound: passed.length,
+        universeSize:  s.universeSize  ?? null,
+        evaluated:     s.evaluated     ?? null,
+        rejectedPrice: s.rejectedPrice ?? null,
+        rejectedPct:   s.rejectedPct   ?? null,
+        rejectedRvol:  s.rejectedRvol  ?? null,
+        rejectedFloat: s.rejectedFloat ?? null,
+        durationMs:    s.durationMs    ?? null,
         candidates: {
           create: candidates.map((c: any, i: number) => ({ ...c, rank: i + 1 })),
         },

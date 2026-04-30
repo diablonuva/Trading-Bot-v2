@@ -157,6 +157,15 @@ model ScanResult {
   candidatesFound Int
   candidates  ScanCandidate[]
 
+  // Aggregate stats from the scan run — populated by /telemetry/scan
+  universeSize   Int?
+  evaluated      Int?
+  rejectedPrice  Int?
+  rejectedPct    Int?
+  rejectedRvol   Int?
+  rejectedFloat  Int?
+  durationMs     Int?
+
   createdAt DateTime @default(now())
 
   @@index([sessionId])

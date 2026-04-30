@@ -44,6 +44,20 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class ScanStats:
+    """Aggregate counters from a single scan run, for the dashboard's
+    'Last Scan' detail line."""
+    universe_size: int = 0      # all tradeable US equities Alpaca returned
+    evaluated: int = 0          # made it past the cheap price pre-filter
+    passed: int = 0             # passed all 5 pillars
+    rejected_price: int = 0
+    rejected_pct: int = 0
+    rejected_rvol: int = 0
+    rejected_float: int = 0
+    duration_ms: int = 0
+
+
+@dataclass
 class CandidateStock:
     symbol: str
     price: float
@@ -57,16 +71,20 @@ class CandidateStock:
     score: float = 0.0             # composite ranking score
 
     def passes_filters(self, cfg: dict) -> bool:
+        return self.failed_pillar(cfg) is None
+
+    def failed_pillar(self, cfg: dict) -> Optional[str]:
+        """Returns the name of the first pillar this candidate fails, or None."""
         s = cfg["scanner"]
         if not (s["price_min"] <= self.price <= s["price_max"]):
-            return False
+            return "price"
         if self.pct_change < s["pct_change_min"]:
-            return False
+            return "pct"
         if self.relative_volume < s["relative_volume_min"]:
-            return False
+            return "rvol"
         if self.float_shares is not None and self.float_shares > s["float_max_millions"] * 1_000_000:
-            return False
-        return True
+            return "float"
+        return None
 
     def compute_score(self) -> float:
         """Higher is better. Weights align with Ross Cameron's priorities."""
@@ -92,6 +110,10 @@ class Scanner:
         self._data = StockHistoricalDataClient(api_key, secret_key)
         self._trading = TradingClient(api_key, secret_key, paper=paper)
         self._float_cache: dict[str, Optional[float]] = {}
+        self._last_stats: ScanStats = ScanStats()
+
+    def last_stats(self) -> ScanStats:
+        return self._last_stats
 
     # ------------------------------------------------------------------
     # Main scan method
@@ -100,15 +122,25 @@ class Scanner:
     def scan(self) -> list[CandidateStock]:
         """
         Returns watchlist sorted by score (best first), capped at watchlist_size.
+        Side-effect: populates self._last_stats with scan-run counters.
         Runs in ~ 5–15 seconds depending on universe size.
         """
+        t0 = time.time()
+        stats = ScanStats()
+
         universe = self._get_active_symbols()
+        stats.universe_size = len(universe)
         if not universe:
             logger.warning("Empty universe — skipping scan")
+            stats.duration_ms = int((time.time() - t0) * 1000)
+            self._last_stats = stats
             return []
 
         snapshots = self._get_snapshots(universe)
+        stats.evaluated = len(snapshots)
         if not snapshots:
+            stats.duration_ms = int((time.time() - t0) * 1000)
+            self._last_stats = stats
             return []
 
         candidates = []
@@ -116,16 +148,34 @@ class Scanner:
             candidate = self._build_candidate(symbol, snap)
             if candidate is None:
                 continue
-            if candidate.passes_filters(self._cfg):
+            failed = candidate.failed_pillar(self._cfg)
+            if failed is None:
                 candidate.compute_score()
                 candidates.append(candidate)
+            elif failed == "price":
+                stats.rejected_price += 1
+            elif failed == "pct":
+                stats.rejected_pct += 1
+            elif failed == "rvol":
+                stats.rejected_rvol += 1
+            elif failed == "float":
+                stats.rejected_float += 1
+
+        stats.passed = len(candidates)
+        stats.duration_ms = int((time.time() - t0) * 1000)
+        self._last_stats = stats
 
         candidates.sort(key=lambda c: c.score, reverse=True)
         watchlist = candidates[: self._cfg["scanner"]["watchlist_size"]]
 
         logger.info(
-            "Scan complete: %d passed filters, top %d selected",
+            "Scan complete: %d passed filters, top %d selected (universe=%d, "
+            "evaluated=%d, rejected price=%d pct=%d rvol=%d float=%d, %dms)",
             len(candidates), len(watchlist),
+            stats.universe_size, stats.evaluated,
+            stats.rejected_price, stats.rejected_pct,
+            stats.rejected_rvol, stats.rejected_float,
+            stats.duration_ms,
         )
         for c in watchlist:
             logger.info(

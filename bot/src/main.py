@@ -128,7 +128,17 @@ class TradingBot:
         candidates = self._scanner.scan()
         # Telemetry: every scan result, even when empty
         scan_payload = [_candidate_to_dict(c, i + 1, True) for i, c in enumerate(candidates)]
-        self._tel.scan_result(scan_payload)
+        stats = self._scanner.last_stats()
+        self._tel.scan_result(scan_payload, stats={
+            "universeSize":   stats.universe_size,
+            "evaluated":      stats.evaluated,
+            "passed":         stats.passed,
+            "rejectedPrice":  stats.rejected_price,
+            "rejectedPct":    stats.rejected_pct,
+            "rejectedRvol":   stats.rejected_rvol,
+            "rejectedFloat":  stats.rejected_float,
+            "durationMs":     stats.duration_ms,
+        })
 
         self._watchlist = [c.symbol for c in candidates]
         if not self._watchlist:
@@ -164,7 +174,17 @@ class TradingBot:
         self._tel.event("MARKET_OPEN", "Market open — re-scanning for new movers")
         candidates = self._scanner.scan()
         scan_payload = [_candidate_to_dict(c, i + 1, True) for i, c in enumerate(candidates)]
-        self._tel.scan_result(scan_payload)
+        stats = self._scanner.last_stats()
+        self._tel.scan_result(scan_payload, stats={
+            "universeSize":   stats.universe_size,
+            "evaluated":      stats.evaluated,
+            "passed":         stats.passed,
+            "rejectedPrice":  stats.rejected_price,
+            "rejectedPct":    stats.rejected_pct,
+            "rejectedRvol":   stats.rejected_rvol,
+            "rejectedFloat":  stats.rejected_float,
+            "durationMs":     stats.duration_ms,
+        })
 
         new_symbols = [c.symbol for c in candidates if c.symbol not in self._watchlist]
         if new_symbols:
@@ -490,6 +510,19 @@ class TradingBot:
                     self._watchlist.append(c.symbol)
                     self._feed.subscribe([c.symbol])
                     logger.info("New mover added to watchlist: %s", c.symbol)
+            # Push scan stats so the dashboard's 'Last Scan' line stays fresh
+            scan_payload = [_candidate_to_dict(c, i + 1, True) for i, c in enumerate(candidates)]
+            stats = self._scanner.last_stats()
+            self._tel.scan_result(scan_payload, stats={
+                "universeSize":   stats.universe_size,
+                "evaluated":      stats.evaluated,
+                "passed":         stats.passed,
+                "rejectedPrice":  stats.rejected_price,
+                "rejectedPct":    stats.rejected_pct,
+                "rejectedRvol":   stats.rejected_rvol,
+                "rejectedFloat":  stats.rejected_float,
+                "durationMs":     stats.duration_ms,
+            })
         except Exception as e:
             logger.warning("Periodic rescan error: %s", e)
 

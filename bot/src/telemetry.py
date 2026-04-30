@@ -162,10 +162,11 @@ class Telemetry:
     # Scanner
     # ------------------------------------------------------------------
 
-    def scan_result(self, candidates: list[dict]) -> None:
+    def scan_result(self, candidates: list[dict], stats: Optional[dict] = None) -> None:
         self._post("/telemetry/scan", {
             "sessionDate": self._session_date,
             "candidates": candidates,
+            "stats": stats or {},
         })
 
     # ------------------------------------------------------------------
