@@ -28,8 +28,13 @@ scanner:
   relative_volume_min: 5.0
   # Must already be up at least this % today
   pct_change_min: 10.0
-  # Float in millions — lower float = bigger moves
-  float_max_millions: 20.0
+  # Float in millions — original DTW spec is 20M for explosive moves on
+  # micro-floats, but those symbols (often SPAC units, OTC-leaning small
+  # caps) don't trade on IEX so the free-tier minute-bar feed returns no
+  # data for them. 200M opens the universe to mid-caps that DO route
+  # consistently through IEX, at the cost of slightly less explosive
+  # average moves. Drop back to 20 once you upgrade to Alpaca's SIP feed.
+  float_max_millions: 200.0
   # How many top stocks to track on watchlist
   watchlist_size: 5
   # Minimum pre-market volume (shares) to consider
