@@ -186,18 +186,26 @@ done
 # ===================================================================
 section "WebSocket"
 
-# Basic check: nginx returns 101/426 on /ws (WS upgrade required)
-WS_CODE="$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 \
+# curl with WS upgrade headers. We check the response status line directly
+# (-i to include headers, then grep) because %{http_code} concatenates the
+# 101 with a trailing 000 once the connection closes — looks like 101000
+# and trips the case match.
+WS_HEAD="$(curl -s -i --max-time 5 \
   -H "Connection: Upgrade" \
   -H "Upgrade: websocket" \
   -H "Sec-WebSocket-Version: 13" \
   -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
-  "$BASE_URL/ws" || echo "000")"
-case "$WS_CODE" in
-  101) pass "/ws upgrades to WebSocket (HTTP 101)" ;;
-  400|426) warn "/ws responded $WS_CODE (server reachable but rejected upgrade — probably curl handshake quirk, not a real failure)" ;;
-  *)   fail "/ws → HTTP $WS_CODE" ;;
-esac
+  "$BASE_URL/ws" 2>&1 | head -1 || echo "")"
+
+if echo "$WS_HEAD" | grep -q "101"; then
+  pass "/ws upgrades to WebSocket (HTTP 101 Switching Protocols)"
+elif echo "$WS_HEAD" | grep -qE "4[0-9][0-9]"; then
+  warn "/ws response: $WS_HEAD (server reachable but rejected upgrade)"
+elif [ -z "$WS_HEAD" ]; then
+  fail "/ws — no response (api/nginx down or /ws not configured)"
+else
+  fail "/ws → $WS_HEAD"
+fi
 
 # ===================================================================
 # Postgres / schema
