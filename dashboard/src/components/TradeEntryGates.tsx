@@ -5,7 +5,7 @@ import type { GateCheck } from "../types";
 
 interface Props {
   session: { halted?: boolean; endedAt?: string; totalTrades?: number; tradingMode?: string } | null | undefined;
-  account: { buyingPower?: number; daytradeCount?: number; equity?: number; mode?: string } | null | undefined;
+  account: { buyingPower?: number; mode?: string } | null | undefined;
   watchlistCount: number;
   wsConnected: boolean;
   maxTradesPerDay?: number;
@@ -90,12 +90,7 @@ export default function TradeEntryGates({
 
   const tradesUsed = session?.totalTrades ?? 0;
   const buyingPower = account?.buyingPower ?? 0;
-  const dayTrades = account?.daytradeCount ?? 0;
-  const equity = account?.equity ?? 0;
   const sessionActive = !!session && !session.endedAt;
-  // PDT rule restricts <$25k retail accounts to 3 day-trades per 5-day window.
-  // Accounts ≥ $25k are exempt and can day-trade freely.
-  const pdtExempt = equity >= 25000;
 
   const globalGates: Gate[] = [
     { name: "Entry Window",  ok: inEntryWindow },
@@ -106,10 +101,6 @@ export default function TradeEntryGates({
     { name: "Watchlist",     ok: watchlistCount > 0 },
     { name: "Capital",       ok: buyingPower > 1000 },
     { name: `Slots ${tradesUsed}/${maxTradesPerDay}`, ok: tradesUsed < maxTradesPerDay },
-    {
-      name: pdtExempt ? `Day Trades ${dayTrades} ✓` : `Day Trades ${dayTrades}/3`,
-      ok: pdtExempt || dayTrades < 3,
-    },
   ];
 
   const blocked = globalGates.filter((g) => !g.ok).length;
