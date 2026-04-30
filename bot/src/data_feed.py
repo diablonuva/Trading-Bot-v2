@@ -74,11 +74,67 @@ class DataFeed:
         with self._lock:
             new = [s for s in symbols if s not in self._subscribed]
             self._subscribed.update(new)
-        if new:
-            logger.info("Subscribed to bars: %s", new)
+        if not new:
+            return
+        logger.info("Subscribed to bars: %s", new)
+
+        # Backfill ~90 min of history so strategy.evaluate() (which requires
+        # len(df) >= 30 bars) can run on the very first poll. Without this,
+        # signals can't fire for 30 minutes after a watchlist is built —
+        # by which point the morning move may already be over.
+        try:
+            self._backfill(new, minutes=90)
+        except Exception as e:
+            logger.warning("Backfill failed for %s: %s", new, e)
+
         # Lazy start: only spin the polling thread once we have something
         if not self._thread or not self._thread.is_alive():
             self.start()
+
+    def _backfill(self, symbols: list[str], minutes: int = 90) -> None:
+        """One-time fetch on subscribe — populates the buffer with enough
+        history for the strategy to start evaluating immediately."""
+        start = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+        req = StockBarsRequest(
+            symbol_or_symbols=symbols,
+            timeframe=TimeFrame.Minute,
+            start=start,
+            feed="iex",
+        )
+        result = self._client.get_stock_bars(req)
+        bars_map = _barset_to_dict(result)
+
+        for symbol in symbols:
+            bars = sorted(bars_map.get(symbol, []), key=lambda b: b.timestamp)
+            if not bars:
+                logger.warning("Backfill: no bars returned for %s", symbol)
+                continue
+            with self._lock:
+                for bar in bars:
+                    self._buffers[symbol].append({
+                        "timestamp": bar.timestamp,
+                        "open":  float(bar.open),
+                        "high":  float(bar.high),
+                        "low":   float(bar.low),
+                        "close": float(bar.close),
+                        "volume": float(bar.volume),
+                    })
+            self._last_bar_ts[symbol] = bars[-1].timestamp
+            logger.info("Backfilled %d bars for %s (latest close=%.2f)",
+                        len(bars), symbol, float(bars[-1].close))
+
+        # Fire callbacks once so the strategy gets a chance to evaluate
+        # immediately on the backfilled history rather than waiting for
+        # the next polling tick.
+        for symbol in symbols:
+            df = self.get_bars(symbol)
+            if df.empty:
+                continue
+            for cb in self._callbacks:
+                try:
+                    cb(symbol, df)
+                except Exception as e:
+                    logger.exception("Error in backfill callback for %s: %s", symbol, e)
 
     def unsubscribe(self, symbols: list[str]) -> None:
         with self._lock:
