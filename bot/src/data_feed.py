@@ -62,6 +62,14 @@ class DataFeed:
             self._subscribed.update(new_symbols)
         logger.info("Subscribed to bars: %s", new_symbols)
 
+        # Lazy start: only consume an Alpaca WebSocket connection slot once
+        # we actually have something to listen to. Free-tier accounts get
+        # exactly 1 concurrent WS connection — keeping it idle while the
+        # watchlist is empty wastes the slot if the previous container's
+        # connection hasn't timed out yet on Alpaca's side.
+        if not self._thread or not self._thread.is_alive():
+            self.start()
+
     def unsubscribe(self, symbols: list[str]) -> None:
         self._stream.unsubscribe_bars(*symbols)
         with self._lock:
@@ -70,7 +78,11 @@ class DataFeed:
         logger.info("Unsubscribed from: %s", symbols)
 
     def start(self) -> None:
-        """Run the WebSocket stream with auto-reconnect in a background thread."""
+        """Run the WebSocket stream with auto-reconnect in a background thread.
+        Idempotent — safe to call multiple times; subsequent calls are no-ops
+        if the thread is already alive."""
+        if self._thread and self._thread.is_alive():
+            return
         self._stopping = False
         self._thread = threading.Thread(target=self._run_with_reconnect, daemon=True)
         self._thread.start()

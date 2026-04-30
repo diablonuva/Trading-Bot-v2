@@ -570,7 +570,11 @@ class TradingBot:
                           id="equity_snapshot")
 
         scheduler.start()
-        self._feed.start()
+        # DataFeed.start() is now lazy: subscribe() triggers it when the
+        # watchlist is non-empty. We don't burn an Alpaca free-tier WS slot
+        # while idle (previous unconditional start() caused 'connection limit
+        # exceeded' errors on every restart while a ghost connection from
+        # the prior container was still authenticated server-side).
 
         # SIGTERM handler — close all positions before exiting
         def _handle_sigterm(signum, frame):
