@@ -17,7 +17,7 @@ import threading
 import time
 from collections import defaultdict, deque
 from datetime import datetime, timezone
-from typing import Callable
+from typing import Callable, Optional
 
 import pandas as pd
 from alpaca.data.live import StockDataStream
@@ -99,35 +99,51 @@ class DataFeed:
     def _run_with_reconnect(self) -> None:
         """Wrap stream.run() in a reconnect loop with exponential backoff.
 
-        Alpaca's WebSocket can drop for many reasons over a multi-week run
-        (network blips, their maintenance, idle timeouts). When that happens
-        the underlying .run() returns or raises. Without this loop the bot
-        silently stops receiving bars until the container is restarted.
+        Alpaca's WebSocket can drop for many reasons over a multi-week run.
+        The underlying .run() returns or raises on disconnect; without this
+        loop the bot silently stops receiving bars until container restart.
         """
         attempt = 0
         while not self._stopping:
+            err: Optional[Exception] = None
             try:
                 logger.info("DataFeed: starting WebSocket stream (attempt %d)", attempt + 1)
                 self._stream.run()
-                # If run() returns cleanly while we're not stopping, treat it
-                # as an unexpected disconnect.
                 if self._stopping:
                     return
                 logger.warning("DataFeed: stream returned without error — reconnecting")
             except Exception as e:
                 if self._stopping:
                     return
-                logger.error("DataFeed: stream errored: %s — reconnecting", e)
+                err = e
+                logger.error("DataFeed: stream errored: %s", e)
 
-            # Backoff before reconnect
-            wait = RECONNECT_BACKOFFS[min(attempt, len(RECONNECT_BACKOFFS) - 1)]
+            # Detect the 'connection limit exceeded' case — usually a ghost
+            # connection from a previous container that Alpaca hasn't timed
+            # out yet. Hammering it makes the ghost stick around longer.
+            # Wait at least 5 minutes before trying again.
+            err_msg = str(err).lower() if err else ""
+            if "connection limit" in err_msg or "auth failed" in err_msg:
+                wait = max(300, RECONNECT_BACKOFFS[min(attempt, len(RECONNECT_BACKOFFS) - 1)])
+                logger.warning(
+                    "DataFeed: Alpaca refused auth (likely ghost from prior "
+                    "container). Backing off %ds to let the ghost time out.",
+                    wait,
+                )
+            else:
+                wait = RECONNECT_BACKOFFS[min(attempt, len(RECONNECT_BACKOFFS) - 1)]
+                logger.info("DataFeed: reconnecting in %ds", wait)
+
             attempt += 1
-            logger.info("DataFeed: reconnecting in %ds", wait)
             time.sleep(wait)
 
-            # Rebuild the stream client and re-subscribe to whatever we had.
-            # alpaca-py's StockDataStream is single-shot per .run() call, so
-            # we need a fresh instance after a disconnect.
+            # Rebuild the stream client (alpaca-py StockDataStream is
+            # single-shot per .run() call). DO NOT reset attempt here —
+            # rebuilding a client object always 'succeeds' since it doesn't
+            # actually connect until .run() is called. Resetting was the
+            # bug that caused 1-2s retry hammering. attempt only resets
+            # naturally if a future run() call streams long enough to
+            # implicitly count as healthy.
             try:
                 self._stream = _new_stream()
                 with self._lock:
@@ -135,7 +151,6 @@ class DataFeed:
                 if symbols:
                     self._stream.subscribe_bars(self._on_bar, *symbols)
                     logger.info("DataFeed: re-subscribed to %d symbols after reconnect", len(symbols))
-                attempt = 0  # Successful reconnect — reset backoff
             except Exception as e:
                 logger.error("DataFeed: failed to rebuild stream: %s", e)
 
