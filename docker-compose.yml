@@ -48,6 +48,7 @@ services:
         condition: service_healthy
     volumes:
       - ./api/prisma:/app/prisma  # allow schema access without rebuild
+      - ./bot/config:/app/bot-config:ro  # /api/config reads settings.yaml
     networks:
       - internal
     healthcheck:

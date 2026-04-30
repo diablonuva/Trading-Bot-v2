@@ -79,9 +79,11 @@ export default function TradeEntryGates({
   // ---- Global gate computation ----
   const { hour, minute, weekday } = nyHourMinute();
   const isWeekday = weekday >= 1 && weekday <= 5;
+  // Entry window: 07:00 ET (pre-market) through 15:00 ET (stop_entries).
+  // Matches stop_entries_time in bot/config/settings.yaml.
   const inEntryWindow = isWeekday
     && (hour > 7 || (hour === 7 && minute >= 0))
-    && hour < 11;
+    && hour < 15;
   const inMarketHours = isWeekday
     && (hour > 9 || (hour === 9 && minute >= 30))
     && hour < 16;
@@ -91,13 +93,17 @@ export default function TradeEntryGates({
   const dayTrades = account?.daytradeCount ?? 0;
   const sessionActive = !!session && !session.endedAt;
 
+  // Watchlist count is shown elsewhere on the dashboard but not as a gate
+  // here — having an empty watchlist is the normal state outside of high-
+  // momentum days, not a "blocker".
+  void watchlistCount;
+
   const globalGates: Gate[] = [
     { name: "Entry Window",  ok: inEntryWindow },
     { name: "Market Open",   ok: inMarketHours },
     { name: "Bot Live",      ok: wsConnected },
     { name: "Session",       ok: sessionActive },
     { name: "Not Halted",    ok: !session?.halted },
-    { name: "Watchlist",     ok: watchlistCount > 0 },
     { name: "Capital",       ok: buyingPower > 1000 },
     { name: `Slots ${tradesUsed}/${maxTradesPerDay}`, ok: tradesUsed < maxTradesPerDay },
     { name: `Day Trades ${dayTrades}/3`, ok: dayTrades < 3 },

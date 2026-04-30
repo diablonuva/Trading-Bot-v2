@@ -12,9 +12,11 @@ trading:
   # Market open — switch to aggressive mode
   market_open_time: "09:30"
   # Stop accepting new entries after this time
-  stop_entries_time: "11:00"
-  # Close ALL open positions by this time
-  close_all_time: "12:00"
+  # Trading the whole session — last entry 30 min before close-all
+  # so brackets have a chance to fill before forced exit.
+  stop_entries_time: "15:00"
+  # Close ALL open positions by this time (30 min before NYSE 16:00 close)
+  close_all_time: "15:30"
   # Candle timeframe for signals (minutes)
   candle_timeframe_minutes: 1
 

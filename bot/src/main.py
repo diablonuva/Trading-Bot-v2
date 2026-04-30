@@ -521,14 +521,17 @@ class TradingBot:
                           minute=int(t["close_all_time"].split(":")[1]),
                           day_of_week=wkd, id="close_all")
 
-        # Re-scan every minute during active session to catch new movers
+        # Re-scan every minute during active session to catch new movers.
+        # 7-14 covers the full entry window (07:00 to 15:00 stop_entries),
+        # extended from the old 7-11 morning-only window.
         scheduler.add_job(self._periodic_rescan, "cron",
-                          minute="*/1", hour="7-11", day_of_week=wkd,
+                          minute="*/1", hour="7-14", day_of_week=wkd,
                           id="periodic_rescan")
 
-        # Equity snapshot every minute during the active session — drives the dashboard chart
+        # Equity snapshot every minute through the entire session including
+        # the 15:00-15:30 wind-down so the dashboard chart stays current.
         scheduler.add_job(self.job_equity_snapshot, "cron",
-                          minute="*/1", hour="7-12", day_of_week=wkd,
+                          minute="*/1", hour="7-15", day_of_week=wkd,
                           id="equity_snapshot")
 
         scheduler.start()

@@ -12,8 +12,12 @@ import { broadcast } from "../websocket";
 
 const router = Router();
 
-// Resolve config/settings.yaml relative to project root (two levels up from dist/)
-const SETTINGS_PATH = path.resolve(process.cwd(), "../bot/config/settings.yaml");
+// settings.yaml is mounted into the api container at /app/bot-config in
+// docker-compose.yml so the Scanner page's "5-Pillar Filter Thresholds"
+// card can read it. Falls back to the dev path if the mount isn't there.
+const SETTINGS_PATH = fs.existsSync("/app/bot-config/settings.yaml")
+  ? "/app/bot-config/settings.yaml"
+  : path.resolve(process.cwd(), "../bot/config/settings.yaml");
 const ENV_PATH      = path.resolve(process.cwd(), "../.env");
 
 router.get("/", (_req: Request, res: Response) => {
