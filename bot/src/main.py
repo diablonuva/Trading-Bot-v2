@@ -34,6 +34,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 from zoneinfo import ZoneInfo
 
 import yaml
@@ -50,18 +51,33 @@ from strategy import Strategy
 from telemetry import Telemetry
 
 
-def _candidate_to_dict(c: CandidateStock, rank: int, passed: bool = True) -> dict:
-    """Convert scanner output to the API's expected /telemetry/scan shape."""
+def _candidate_to_dict(
+    c: CandidateStock,
+    rank: Optional[int],
+    passed: bool = True,
+    failed_pillar: Optional[str] = None,
+) -> dict:
+    """Convert scanner output to the API's expected /telemetry/scan shape.
+
+    The API's ScanCandidate schema requires volume / avgDailyVolume /
+    premarketGap as non-null Floats — they were missing here previously, which
+    would have caused every candidate insert to fail Prisma validation on the
+    first day a watchlist actually formed.
+    """
     return {
-        "symbol": c.symbol,
-        "price": c.price,
-        "pctChange": c.pct_change,
+        "symbol":         c.symbol,
+        "price":          c.price,
+        "pctChange":      c.pct_change,
+        "volume":         c.volume,
+        "avgDailyVolume": c.avg_daily_volume,
         "relativeVolume": c.relative_volume,
-        "floatShares": c.float_shares,
-        "hasNews": c.has_news,
-        "score": c.score,
-        "passedFilters": passed,
-        "rank": rank,
+        "floatShares":    c.float_shares,
+        "hasNews":        c.has_news,
+        "premarketGap":   c.premarket_gap_pct,
+        "score":          c.score,
+        "passedFilters":  passed,
+        "failedPillar":   failed_pillar,
+        "rank":           rank,
     }
 
 # ---------------------------------------------------------------------------
@@ -153,8 +169,15 @@ class TradingBot:
         logger.info("=== PRE-MARKET SCAN STARTED ===")
         self._tel.event("PRE_MARKET_SCAN", "Pre-market scan started")
         candidates = self._scanner.scan()
-        # Telemetry: every scan result, even when empty
-        scan_payload = [_candidate_to_dict(c, i + 1, True) for i, c in enumerate(candidates)]
+        near_misses = self._scanner.last_near_misses()
+        # Telemetry: passing candidates + near-misses (passedFilters=false,
+        # failedPillar tagged) so the dashboard can show why each near-miss
+        # didn't make the watchlist.
+        scan_payload = (
+            [_candidate_to_dict(c, i + 1, True) for i, c in enumerate(candidates)] +
+            [_candidate_to_dict(c, None, False, getattr(c, "_failed_pillar", None))
+             for c in near_misses]
+        )
         stats = self._scanner.last_stats()
         self._tel.scan_result(scan_payload, stats={
             "universeSize":   stats.universe_size,
@@ -205,7 +228,12 @@ class TradingBot:
         logger.info("=== MARKET OPEN ===")
         self._tel.event("MARKET_OPEN", "Market open — re-scanning for new movers")
         candidates = self._scanner.scan()
-        scan_payload = [_candidate_to_dict(c, i + 1, True) for i, c in enumerate(candidates)]
+        near_misses = self._scanner.last_near_misses()
+        scan_payload = (
+            [_candidate_to_dict(c, i + 1, True) for i, c in enumerate(candidates)] +
+            [_candidate_to_dict(c, None, False, getattr(c, "_failed_pillar", None))
+             for c in near_misses]
+        )
         stats = self._scanner.last_stats()
         self._tel.scan_result(scan_payload, stats={
             "universeSize":   stats.universe_size,
@@ -576,7 +604,12 @@ class TradingBot:
                     self._feed.subscribe([c.symbol])
                     logger.info("New mover added to watchlist: %s", c.symbol)
             # Push scan stats so the dashboard's 'Last Scan' line stays fresh
-            scan_payload = [_candidate_to_dict(c, i + 1, True) for i, c in enumerate(candidates)]
+            near_misses = self._scanner.last_near_misses()
+            scan_payload = (
+                [_candidate_to_dict(c, i + 1, True) for i, c in enumerate(candidates)] +
+                [_candidate_to_dict(c, None, False, getattr(c, "_failed_pillar", None))
+                 for c in near_misses]
+            )
             stats = self._scanner.last_stats()
             self._tel.scan_result(scan_payload, stats={
                 "universeSize":   stats.universe_size,

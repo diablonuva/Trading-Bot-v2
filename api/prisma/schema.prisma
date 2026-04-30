@@ -188,6 +188,7 @@ model ScanCandidate {
   premarketGap  Float
   score         Float
   passedFilters Boolean
+  failedPillar  String?  // "price" | "pct" | "rvol" | "float" — set on near-misses
   rank          Int?
 
   createdAt DateTime @default(now())

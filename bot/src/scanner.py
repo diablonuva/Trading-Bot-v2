@@ -72,20 +72,26 @@ class CandidateStock:
     score: float = 0.0             # composite ranking score
 
     def passes_filters(self, cfg: dict) -> bool:
-        return self.failed_pillar(cfg) is None
+        return not self.all_failures(cfg)
 
     def failed_pillar(self, cfg: dict) -> Optional[str]:
-        """Returns the name of the first pillar this candidate fails, or None."""
+        """First pillar this candidate fails, or None if it passes all."""
+        fails = self.all_failures(cfg)
+        return fails[0] if fails else None
+
+    def all_failures(self, cfg: dict) -> list[str]:
+        """Every pillar this candidate fails, in pillar order."""
         s = cfg["scanner"]
+        fails: list[str] = []
         if not (s["price_min"] <= self.price <= s["price_max"]):
-            return "price"
+            fails.append("price")
         if self.pct_change < s["pct_change_min"]:
-            return "pct"
+            fails.append("pct")
         if self.relative_volume < s["relative_volume_min"]:
-            return "rvol"
+            fails.append("rvol")
         if self.float_shares is not None and self.float_shares > s["float_max_millions"] * 1_000_000:
-            return "float"
-        return None
+            fails.append("float")
+        return fails
 
     def compute_score(self) -> float:
         """Higher is better. Weights align with Ross Cameron's priorities."""
@@ -116,9 +122,15 @@ class Scanner:
         # offerings, do reverse splits, etc.).
         self._float_cache_date: Optional[date] = None
         self._last_stats: ScanStats = ScanStats()
+        # Top near-misses from the last scan. Each carries a `_failed_pillar`
+        # tag so the dashboard can show why each one didn't make the watchlist.
+        self._last_near_misses: list[CandidateStock] = []
 
     def last_stats(self) -> ScanStats:
         return self._last_stats
+
+    def last_near_misses(self) -> list[CandidateStock]:
+        return self._last_near_misses
 
     # ------------------------------------------------------------------
     # Main scan method
@@ -149,26 +161,42 @@ class Scanner:
             return []
 
         candidates = []
+        near_misses: list[CandidateStock] = []
         for symbol, snap in snapshots.items():
             candidate = self._build_candidate(symbol, snap)
             if candidate is None:
                 continue
-            failed = candidate.failed_pillar(self._cfg)
-            if failed is None:
+            fails = candidate.all_failures(self._cfg)
+            if not fails:
                 candidate.compute_score()
                 candidates.append(candidate)
-            elif failed == "price":
+                continue
+
+            # Track first failure for the rejection-by-pillar stats line
+            first = fails[0]
+            if first == "price":
                 stats.rejected_price += 1
-            elif failed == "pct":
+            elif first == "pct":
                 stats.rejected_pct += 1
-            elif failed == "rvol":
+            elif first == "rvol":
                 stats.rejected_rvol += 1
-            elif failed == "float":
+            elif first == "float":
                 stats.rejected_float += 1
+
+            # Near-miss = failed exactly one pillar. Carry a `_failed_pillar`
+            # tag so the dashboard can show "this missed because of X".
+            if len(fails) == 1:
+                candidate.compute_score()
+                candidate._failed_pillar = fails[0]  # type: ignore[attr-defined]
+                near_misses.append(candidate)
 
         stats.passed = len(candidates)
         stats.duration_ms = int((time.time() - t0) * 1000)
         self._last_stats = stats
+
+        # Top 10 near-misses by composite score
+        near_misses.sort(key=lambda c: c.score, reverse=True)
+        self._last_near_misses = near_misses[:10]
 
         candidates.sort(key=lambda c: c.score, reverse=True)
         watchlist = candidates[: self._cfg["scanner"]["watchlist_size"]]

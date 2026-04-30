@@ -11,8 +11,23 @@ interface ScanCandidate {
   hasNews: boolean;
   score: number;
   passedFilters: boolean;
+  failedPillar?: string | null;  // "price" | "pct" | "rvol" | "float" — set on near-misses
   rank?: number;
 }
+
+const PILLAR_LABELS: Record<string, string> = {
+  price: "Price out of $2-$20 range",
+  pct:   "% change below 10% threshold",
+  rvol:  "Relative vol below 5x threshold",
+  float: "Float above 20M cap",
+};
+
+const PILLAR_BADGES: Record<string, string> = {
+  price: "Price",
+  pct:   "% Change",
+  rvol:  "Rel Vol",
+  float: "Float",
+};
 
 interface ScanResult {
   scannedAt: string;
@@ -70,6 +85,11 @@ export default function ScannerPage() {
     (scanResult?.rejectedPct ?? 0) +
     (scanResult?.rejectedRvol ?? 0) +
     (scanResult?.rejectedFloat ?? 0);
+
+  // Split candidates into watchlist (passed) vs near-misses (failed exactly 1 pillar)
+  const allCandidates = scanResult?.candidates ?? [];
+  const watchlist   = allCandidates.filter((c) => c.passedFilters);
+  const nearMisses  = allCandidates.filter((c) => !c.passedFilters);
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -136,9 +156,9 @@ export default function ScannerPage() {
       <div className="card">
         <h2 className="text-xs sm:text-sm font-semibold text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2">
           Watchlist
-          <span className="badge-yellow">{scanResult?.candidates.length ?? 0}</span>
+          <span className="badge-yellow">{watchlist.length}</span>
         </h2>
-        {!scanResult?.candidates.length ? (
+        {!watchlist.length ? (
           <p className="text-gray-600 text-sm">No candidates passed the 5-pillar filter on the last scan.</p>
         ) : (
           <div className="overflow-x-auto -mx-3 sm:mx-0">
@@ -156,7 +176,7 @@ export default function ScannerPage() {
                 </tr>
               </thead>
               <tbody>
-                {scanResult.candidates.map((c, i) => (
+                {watchlist.map((c, i) => (
                   <tr key={c.symbol} className="border-b border-gray-800 hover:bg-gray-800/50">
                     <td className="py-2 px-2 sm:px-3 text-gray-500 font-mono">{c.rank ?? i + 1}</td>
                     <td className="py-2 px-2 sm:px-3 font-mono font-bold text-white">{c.symbol}</td>
@@ -172,6 +192,68 @@ export default function ScannerPage() {
                     <td className="py-2 px-2 sm:px-3 text-yellow-400 font-mono">{c.score.toFixed(1)}</td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Near misses — top 10 stocks that failed exactly 1 pillar, sorted by score */}
+      <div className="card">
+        <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
+          <h2 className="text-xs sm:text-sm font-semibold text-gray-300 uppercase tracking-wider flex items-center gap-2">
+            Near Misses
+            <span className="badge-gray">{nearMisses.length}</span>
+          </h2>
+          <span className="text-[10px] sm:text-xs text-gray-500">failed only 1 pillar</span>
+        </div>
+        <p className="text-[11px] sm:text-xs text-gray-500 mb-3">
+          Stocks the scanner came close on but didn't pick up. Confirms the scanner is finding interesting movers — they just don't fit all 5 criteria.
+        </p>
+
+        {!nearMisses.length ? (
+          <p className="text-gray-600 text-sm">No near-misses on the last scan.</p>
+        ) : (
+          <div className="overflow-x-auto -mx-3 sm:mx-0">
+            <table className="w-full text-xs sm:text-sm">
+              <thead>
+                <tr className="text-left text-gray-500 text-[10px] sm:text-xs uppercase tracking-wider border-b border-gray-800">
+                  <th className="py-2 px-2 sm:px-3">Symbol</th>
+                  <th className="py-2 px-2 sm:px-3">Price</th>
+                  <th className="py-2 px-2 sm:px-3">% Change</th>
+                  <th className="py-2 px-2 sm:px-3">Rel Vol</th>
+                  <th className="py-2 px-2 sm:px-3 hidden sm:table-cell">Float</th>
+                  <th className="py-2 px-2 sm:px-3">Failed</th>
+                  <th className="py-2 px-2 sm:px-3 hidden sm:table-cell">Score</th>
+                </tr>
+              </thead>
+              <tbody>
+                {nearMisses.map((c) => {
+                  const fp = c.failedPillar ?? "—";
+                  return (
+                    <tr key={c.symbol} className="border-b border-gray-800 hover:bg-gray-800/50">
+                      <td className="py-2 px-2 sm:px-3 font-mono font-bold text-white">{c.symbol}</td>
+                      <td className={`py-2 px-2 sm:px-3 font-mono ${fp === "price" ? "text-red-400" : "text-gray-200"}`}>
+                        ${c.price.toFixed(2)}
+                      </td>
+                      <td className={`py-2 px-2 sm:px-3 font-mono ${fp === "pct" ? "text-red-400" : "text-green-400"}`}>
+                        {c.pctChange >= 0 ? "+" : ""}{c.pctChange.toFixed(1)}%
+                      </td>
+                      <td className={`py-2 px-2 sm:px-3 font-mono ${fp === "rvol" ? "text-red-400" : "text-gray-300"}`}>
+                        {c.relativeVolume.toFixed(1)}x
+                      </td>
+                      <td className={`py-2 px-2 sm:px-3 font-mono hidden sm:table-cell ${fp === "float" ? "text-red-400" : "text-gray-300"}`}>
+                        {formatFloat(c.floatShares)}
+                      </td>
+                      <td className="py-2 px-2 sm:px-3" title={PILLAR_LABELS[fp] ?? ""}>
+                        <span className="badge-red text-[10px]">{PILLAR_BADGES[fp] ?? fp}</span>
+                      </td>
+                      <td className="py-2 px-2 sm:px-3 text-yellow-400 font-mono hidden sm:table-cell">
+                        {c.score.toFixed(1)}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
