@@ -57,6 +57,7 @@ type ScanCandidate = {
   relativeVolume: number;
   hasNews: boolean;
   score: number;
+  passedFilters: boolean;
 };
 
 type ScanResult = {
@@ -123,7 +124,11 @@ export default function DashboardPage() {
   const accuracy = session?.accuracyPct?.toFixed(1) ?? "—";
   const unrealizedTotal = alpacaPositions?.reduce((s, p) => s + p.unrealizedPnl, 0) ?? 0;
   const botStatus = getBotStatus(session);
-  const watchlist = scanResult?.candidates ?? [];
+  // ScanResult.candidates contains BOTH passing rows AND near-misses
+  // (passedFilters=false). The Watchlist gate should only count passing
+  // ones — otherwise the gate flips green just because there are
+  // near-misses, which doesn't mean the bot has anything tradable.
+  const watchlist = (scanResult?.candidates ?? []).filter((c) => c.passedFilters);
 
   // Live portfolio value comes straight from Alpaca
   const portfolioValue = account?.portfolioValue ?? 0;
