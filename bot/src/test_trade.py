@@ -180,6 +180,13 @@ def main() -> int:
         "TEST COMPLETE | entry=%.2f exit=%.2f reason=%s",
         entry_price, exit_price, exit_reason,
     )
+
+    # Wait for fire-and-forget telemetry posts to actually reach the API.
+    # Without this the daemon threads get killed when the script exits and
+    # the final trade_exit POST never lands — trade row stays 'OPEN' forever.
+    log.info("Flushing telemetry...")
+    tel.flush(timeout=10.0)
+
     return 0
 
 

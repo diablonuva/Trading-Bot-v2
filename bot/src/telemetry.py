@@ -17,6 +17,7 @@ Usage:
 import logging
 import os
 import threading
+import time
 from datetime import date, datetime, timezone
 from typing import Any, Optional
 
@@ -32,6 +33,11 @@ class Telemetry:
     def __init__(self):
         self._session_date = str(date.today())
         self._enabled = bool(API_BASE)
+        # Outstanding fire-and-forget threads — flush() waits for these.
+        # The bot itself never calls flush (it runs forever, threads complete
+        # naturally), but standalone scripts (test_trade, multi_test_trade)
+        # need it so their final trade_exit POSTs land before exit.
+        self._pending: list[threading.Thread] = []
         logger.info("Telemetry target: %s", API_BASE)
 
     # ------------------------------------------------------------------
@@ -242,9 +248,27 @@ class Telemetry:
         """Fire-and-forget in background thread."""
         if not self._enabled:
             return
-        threading.Thread(
+        t = threading.Thread(
             target=self._post_sync, args=(path, payload), daemon=True
-        ).start()
+        )
+        t.start()
+        # Track for flush(); cap the list so a long-running bot doesn't grow
+        # this unbounded. We only really need recent threads for flush at exit.
+        self._pending.append(t)
+        if len(self._pending) > 200:
+            self._pending = [x for x in self._pending if x.is_alive()][-100:]
+
+    def flush(self, timeout: float = 10.0) -> None:
+        """Wait up to `timeout` seconds for outstanding fire-and-forget POSTs
+        to complete. Call this from a standalone script before exiting so
+        the final trade_exit / event posts have a chance to land."""
+        deadline = time.time() + timeout
+        for t in list(self._pending):
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                break
+            t.join(timeout=remaining)
+        self._pending = [t for t in self._pending if t.is_alive()]
 
     def _post_sync(self, path: str, payload: dict) -> dict:
         """Blocking POST — use only when return value is needed."""

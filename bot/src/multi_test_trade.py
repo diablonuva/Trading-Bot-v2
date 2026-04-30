@@ -248,6 +248,12 @@ def main() -> int:
         "snapshots":       snapshots,
         "final_positions": list(final_state["positions"].keys()),
     }
+    # Wait for fire-and-forget telemetry posts (final trade_exit + event)
+    # to actually reach the API before we exit. Without this the daemon
+    # threads get killed mid-POST and trade rows stay 'OPEN' forever.
+    log.info("Flushing telemetry...")
+    tel.flush(timeout=10.0)
+
     print(json.dumps(output, indent=2, default=str))
     return 0
 
