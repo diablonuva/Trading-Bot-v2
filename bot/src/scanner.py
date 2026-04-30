@@ -375,12 +375,21 @@ class Scanner:
 
     def _batch_avg_daily_volume(self, symbols: list[str]) -> None:
         """Pre-populate self._avg_vol_cache for many symbols in one call.
-        Alpaca accepts a list of symbols on get_stock_bars; limit=55 applies
-        per symbol. Cuts scan time from ~100s to ~5-10s on the first scan."""
+
+        Important: Alpaca's `limit` param applies to the *total* number of
+        bars returned across all symbols, not per-symbol. With a list of 100
+        symbols, limit=55 returns 55 bars total — one per symbol for ~half
+        the request, nothing for the rest. So we use a `start` date instead,
+        which has correct per-symbol semantics. 80 calendar days ≈ 55 trading
+        days even allowing for holidays and weekends.
+        """
         self._ensure_avg_vol_day()
         to_fetch = [s for s in symbols if s not in self._avg_vol_cache]
         if not to_fetch:
             return
+
+        from datetime import datetime, timedelta, timezone
+        start = datetime.now(timezone.utc) - timedelta(days=80)
 
         BATCH = 100  # Alpaca recommends staying under a few hundred per request
         diag_done = False
@@ -390,7 +399,7 @@ class Scanner:
                 req = StockBarsRequest(
                     symbol_or_symbols=batch,
                     timeframe=TimeFrame.Day,
-                    limit=55,
+                    start=start,
                 )
                 result = self._data.get_stock_bars(req)
                 bars_map = self._barset_to_dict(result)
