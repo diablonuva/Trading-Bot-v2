@@ -157,10 +157,11 @@ class DataFeed:
         return float(df["close"].iloc[-1])
 
     # ------------------------------------------------------------------
-    # Internal bar handler
+    # Internal bar handler — must be async because alpaca-py's
+    # StockDataStream awaits the handler. Internal logic is still sync.
     # ------------------------------------------------------------------
 
-    def _on_bar(self, bar) -> None:
+    async def _on_bar(self, bar) -> None:
         symbol = bar.symbol
         record = {
             "timestamp": bar.timestamp,
