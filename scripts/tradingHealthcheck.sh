@@ -184,17 +184,27 @@ else
   fail "/api/portfolio/account did not return ending equity"
 fi
 
-# Positions should be empty after force-close
-END_POS=$(curl -s --max-time 5 "$BASE_URL/api/portfolio/positions")
-END_POS_COUNT=$(echo "$END_POS" | grep -oE '"symbol"' | wc -l | tr -d ' ')
+# Positions should clear after force-close. Alpaca takes a few seconds to
+# unwind bracket orders (cancel child legs, execute close), so poll for
+# up to 30s rather than checking once.
+END_POS_COUNT="?"
+for i in 1 2 3 4 5 6; do
+  END_POS=$(curl -s --max-time 5 "$BASE_URL/api/portfolio/positions")
+  END_POS_COUNT=$(echo "$END_POS" | grep -oE '"symbol"' | wc -l | tr -d ' ')
+  if [ "$END_POS_COUNT" -le "$START_POS_COUNT" ]; then
+    break
+  fi
+  sleep 5
+done
 if [ "$END_POS_COUNT" -le "$START_POS_COUNT" ]; then
   pass "All test positions closed at Alpaca (count: $END_POS_COUNT, baseline: $START_POS_COUNT)"
 else
-  warn "Position count rose from $START_POS_COUNT → $END_POS_COUNT — bracket orders may still be settling"
+  warn "Position count still $END_POS_COUNT after 30s of polling (baseline $START_POS_COUNT) — bracket children may not have unwound; check Alpaca dashboard"
 fi
 
-# Trade rows: should have grown by ~3 (one per placed order)
-sleep 3  # give telemetry a moment to settle
+# Telemetry settles within seconds — give it a moment so trade-exit
+# events and MULTI_TEST_DONE land before we verify.
+sleep 5
 END_TRADE_COUNT=$(curl -s "$BASE_URL/api/trades?limit=1000" | grep -oE '"id"' | wc -l | tr -d ' ')
 TRADE_DELTA=$((END_TRADE_COUNT - START_TRADE_COUNT))
 if [ "$TRADE_DELTA" -ge 1 ]; then
@@ -212,12 +222,22 @@ else
   warn "Only $EVENT_DELTA new events — expected ≥ 2 (init + done)"
 fi
 
-# Spot-check that MULTI_TEST_DONE appeared
-RECENT_EVENTS=$(curl -s "$BASE_URL/api/events?limit=20")
-if echo "$RECENT_EVENTS" | grep -q "MULTI_TEST_DONE"; then
+# Spot-check that MULTI_TEST_DONE appeared. Poll for up to 20s — the
+# bot posts this on a fire-and-forget thread, and POST → Prisma write
+# → /api/events visibility can lag the Python script returning.
+DONE_FOUND="false"
+for i in 1 2 3 4; do
+  RECENT_EVENTS=$(curl -s "$BASE_URL/api/events?limit=20")
+  if echo "$RECENT_EVENTS" | grep -q "MULTI_TEST_DONE"; then
+    DONE_FOUND="true"
+    break
+  fi
+  sleep 5
+done
+if [ "$DONE_FOUND" = "true" ]; then
   pass "MULTI_TEST_DONE event landed in DB"
 else
-  warn "MULTI_TEST_DONE event not yet visible in /api/events"
+  warn "MULTI_TEST_DONE event not visible after 20s of polling"
 fi
 
 # Per-symbol verification: did each symbol generate a trade row?
