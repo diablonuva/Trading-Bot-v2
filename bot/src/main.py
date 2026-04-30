@@ -190,14 +190,32 @@ class TradingBot:
             "durationMs":     stats.duration_ms,
         })
 
-        self._watchlist = [c.symbol for c in candidates]
-        if not self._watchlist:
+        scanner_passed = [c.symbol for c in candidates]
+        if not scanner_passed:
             logger.warning("No candidates passed scanner — watchlist empty")
             self._notifier.info("Pre-market scan: no candidates found")
             self._tel.event("SCAN_EMPTY", "Pre-market scan: 0 candidates passed filters")
+            self._watchlist = []
             return
 
-        self._feed.subscribe(self._watchlist)
+        # subscribe() drops symbols with no IEX bar coverage and returns the
+        # subset we can actually evaluate. That filtered list becomes the
+        # effective watchlist — symbols the scanner approved but IEX can't
+        # see are excluded so the bot doesn't sit idle on dead feeds.
+        self._watchlist = self._feed.subscribe(scanner_passed)
+
+        if not self._watchlist:
+            logger.warning(
+                "Scanner passed %d symbol(s) but none had IEX coverage — "
+                "watchlist effectively empty (free-tier limitation)",
+                len(scanner_passed),
+            )
+            self._tel.event(
+                "WATCHLIST_NO_IEX",
+                f"Scanner passed {len(scanner_passed)} but none had IEX bars",
+            )
+            return
+
         logger.info("Watchlist: %s", self._watchlist)
         self._notifier.info(f"Watchlist built: {', '.join(self._watchlist)}")
         self._tel.event(
@@ -248,9 +266,15 @@ class TradingBot:
 
         new_symbols = [c.symbol for c in candidates if c.symbol not in self._watchlist]
         if new_symbols:
-            self._watchlist.extend(new_symbols)
-            self._feed.subscribe(new_symbols)
-            logger.info("Added market-open movers: %s", new_symbols)
+            accepted = self._feed.subscribe(new_symbols)
+            # Only extend watchlist with symbols that actually got IEX bars
+            iex_kept = [s for s in new_symbols if s in accepted]
+            if iex_kept:
+                self._watchlist.extend(iex_kept)
+                logger.info("Added market-open movers: %s", iex_kept)
+            iex_dropped = [s for s in new_symbols if s not in accepted]
+            if iex_dropped:
+                logger.info("Market-open movers dropped (no IEX bars): %s", iex_dropped)
             self._tel.event(
                 "WATCHLIST_EXTENDED",
                 f"Added {len(new_symbols)} market-open movers",
@@ -518,6 +542,9 @@ class TradingBot:
                 logger.info("Resurrected position from Alpaca: %s x%d @ %.2f", symbol, qty, entry)
             if existing:
                 # Subscribe the data feed to these symbols so soft-exit logic fires
+                # Open positions are forced into the watchlist regardless of IEX
+                # coverage — we still need to manage exits via REST polls / broker
+                # state even if minute-bar evaluation isn't possible.
                 self._watchlist = list(existing.keys())
                 self._feed.subscribe(self._watchlist)
                 self._notifier.info(f"Resurrected {len(existing)} position(s) on startup: {', '.join(existing.keys())}")
@@ -654,9 +681,12 @@ class TradingBot:
             candidates = self._scanner.scan()
             for c in candidates:
                 if c.symbol not in self._watchlist:
-                    self._watchlist.append(c.symbol)
-                    self._feed.subscribe([c.symbol])
-                    logger.info("New mover added to watchlist: %s", c.symbol)
+                    accepted = self._feed.subscribe([c.symbol])
+                    if c.symbol in accepted:
+                        self._watchlist.append(c.symbol)
+                        logger.info("New mover added to watchlist: %s", c.symbol)
+                    else:
+                        logger.info("New mover dropped (no IEX bars): %s", c.symbol)
             # Push scan stats so the dashboard's 'Last Scan' line stays fresh
             near_misses = self._scanner.last_near_misses()
             scan_payload = (

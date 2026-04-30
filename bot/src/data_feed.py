@@ -70,30 +70,54 @@ class DataFeed:
     # Subscription management
     # ------------------------------------------------------------------
 
-    def subscribe(self, symbols: list[str]) -> None:
+    def subscribe(self, symbols: list[str]) -> list[str]:
+        """Subscribe + backfill. Returns the subset of `symbols` that actually
+        have IEX minute-bar data. Caller should use this return value as the
+        effective watchlist — symbols dropped here have no usable feed and
+        the bot would spin uselessly evaluating them."""
         with self._lock:
             new = [s for s in symbols if s not in self._subscribed]
             self._subscribed.update(new)
         if not new:
-            return
+            # All already subscribed — return whatever's currently active
+            return [s for s in symbols if s in self._subscribed]
         logger.info("Subscribed to bars: %s", new)
 
         # Backfill ~90 min of history so strategy.evaluate() (which requires
         # len(df) >= 30 bars) can run on the very first poll. Without this,
-        # signals can't fire for 30 minutes after a watchlist is built —
-        # by which point the morning move may already be over.
+        # signals can't fire for 30 min after a watchlist is built — by
+        # which point the morning move may already be over.
         try:
-            self._backfill(new, minutes=90)
+            accepted = self._backfill(new, minutes=90)
         except Exception as e:
             logger.warning("Backfill failed for %s: %s", new, e)
+            accepted = []
+
+        # Drop symbols that have no IEX bar coverage. Free-tier IEX feed
+        # doesn't see trades for many sub-200M-float symbols (especially
+        # SPAC units like ANSCU). Without bars, strategy never evaluates.
+        rejected = [s for s in new if s not in accepted]
+        if rejected:
+            logger.warning(
+                "Dropping symbols with no IEX bar coverage (free-tier "
+                "limitation): %s", rejected,
+            )
+            with self._lock:
+                for s in rejected:
+                    self._subscribed.discard(s)
 
         # Lazy start: only spin the polling thread once we have something
-        if not self._thread or not self._thread.is_alive():
+        if accepted and (not self._thread or not self._thread.is_alive()):
             self.start()
 
-    def _backfill(self, symbols: list[str], minutes: int = 90) -> None:
+        # Caller's effective watchlist is union of (input symbols already
+        # subscribed) + (this round's accepted ones)
+        return [s for s in symbols if s in self._subscribed]
+
+    def _backfill(self, symbols: list[str], minutes: int = 90) -> list[str]:
         """One-time fetch on subscribe — populates the buffer with enough
-        history for the strategy to start evaluating immediately."""
+        history for the strategy to start evaluating immediately. Returns
+        the subset of `symbols` that actually got data back."""
         start = datetime.now(timezone.utc) - timedelta(minutes=minutes)
         req = StockBarsRequest(
             symbol_or_symbols=symbols,
@@ -104,10 +128,10 @@ class DataFeed:
         result = self._client.get_stock_bars(req)
         bars_map = _barset_to_dict(result)
 
+        accepted: list[str] = []
         for symbol in symbols:
             bars = sorted(bars_map.get(symbol, []), key=lambda b: b.timestamp)
             if not bars:
-                logger.warning("Backfill: no bars returned for %s", symbol)
                 continue
             with self._lock:
                 for bar in bars:
@@ -120,13 +144,14 @@ class DataFeed:
                         "volume": float(bar.volume),
                     })
             self._last_bar_ts[symbol] = bars[-1].timestamp
+            accepted.append(symbol)
             logger.info("Backfilled %d bars for %s (latest close=%.2f)",
                         len(bars), symbol, float(bars[-1].close))
 
         # Fire callbacks once so the strategy gets a chance to evaluate
         # immediately on the backfilled history rather than waiting for
         # the next polling tick.
-        for symbol in symbols:
+        for symbol in accepted:
             df = self.get_bars(symbol)
             if df.empty:
                 continue
@@ -135,6 +160,8 @@ class DataFeed:
                     cb(symbol, df)
                 except Exception as e:
                     logger.exception("Error in backfill callback for %s: %s", symbol, e)
+
+        return accepted
 
     def unsubscribe(self, symbols: list[str]) -> None:
         with self._lock:

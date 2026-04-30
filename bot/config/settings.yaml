@@ -24,10 +24,15 @@ scanner:
   # Price range sweet spot ($2–$20)
   price_min: 2.0
   price_max: 20.0
-  # Relative volume vs 50-day average (5x minimum)
-  relative_volume_min: 5.0
-  # Must already be up at least this % today
-  pct_change_min: 10.0
+  # Relative volume vs 50-day average. Original DTW spec is 5x but
+  # mid-caps with consistent IEX coverage rarely hit that — they have
+  # higher base volume. 3x is still "clearly elevated" but actually
+  # achievable on the IEX-tradable universe. Restore to 5 with SIP.
+  relative_volume_min: 3.0
+  # Must already be up at least this % today. 10% is rare for mid-caps;
+  # 7% is "having a clearly bullish day" on most catalysts. Restore to
+  # 10 with SIP.
+  pct_change_min: 7.0
   # Float in millions — original DTW spec is 20M for explosive moves on
   # micro-floats, but those symbols (often SPAC units, OTC-leaning small
   # caps) don't trade on IEX so the free-tier minute-bar feed returns no
