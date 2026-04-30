@@ -37,6 +37,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 
 import pandas as pd
+from alpaca.data.enums import DataFeed
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
@@ -155,6 +156,7 @@ class DataFeed:
             symbol_or_symbols=symbols,
             timeframe=TimeFrame.Minute,
             start=start,
+            feed=DataFeed.IEX,  # free tier: SIP raises 'subscription does not permit'
         )
         result = self._client.get_stock_bars(req)
         bars_map = _barset_to_dict(result)
