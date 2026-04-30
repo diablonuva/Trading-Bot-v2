@@ -6,6 +6,7 @@ import EquityChart from "../components/EquityChart";
 import MarketChart from "../components/MarketChart";
 import TradeRow from "../components/TradeRow";
 import PnlBadge from "../components/PnlBadge";
+import TradeEntryGates from "../components/TradeEntryGates";
 import type { TradingSession, Trade, Position, EquitySnapshot } from "../types";
 
 const PORTFOLIO_RANGES = [
@@ -89,7 +90,7 @@ export default function DashboardPage() {
       [rangeIdx],
     );
 
-  const { on } = useWebSocket();
+  const { on, connected } = useWebSocket();
 
   // Live polling: refresh Alpaca account + positions every 15s
   useEffect(() => {
@@ -150,6 +151,14 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-4 sm:space-y-6">
+      {/* Live trade-entry gates — always at the top */}
+      <TradeEntryGates
+        session={session}
+        account={account}
+        watchlistCount={watchlist.length}
+        wsConnected={connected}
+      />
+
       {/* Header row */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-lg sm:text-xl font-bold text-white">Today's Session</h1>
