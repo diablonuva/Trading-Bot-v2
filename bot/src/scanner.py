@@ -383,6 +383,7 @@ class Scanner:
             return
 
         BATCH = 100  # Alpaca recommends staying under a few hundred per request
+        diag_done = False
         for i in range(0, len(to_fetch), BATCH):
             batch = to_fetch[i:i + BATCH]
             try:
@@ -392,16 +393,26 @@ class Scanner:
                     limit=55,
                 )
                 result = self._data.get_stock_bars(req)
-                # alpaca-py returns a BarSet which is dict-like via __getitem__
-                # but doesn't expose .get(). Use the underlying .data dict
-                # (which exists on alpaca-py's response models) and fall back
-                # to per-symbol __getitem__ with KeyError handling.
-                data = getattr(result, "data", None)
+                bars_map = self._barset_to_dict(result)
+
+                # One-time diagnostic so we can see what alpaca-py's BarSet
+                # actually contains — type, dict size, sample keys, sample
+                # bar count for the first symbol of the first batch.
+                if not diag_done:
+                    diag_done = True
+                    sample_sym = batch[0] if batch else None
+                    sample_bars = bars_map.get(sample_sym, [])
+                    logger.info(
+                        "DIAG bars: result_type=%s, parsed_len=%d, sample=%s, "
+                        "sample_bar_count=%d, intersection_with_request=%d/%d",
+                        type(result).__name__, len(bars_map), sample_sym,
+                        len(sample_bars),
+                        len(set(bars_map.keys()) & set(batch)),
+                        len(batch),
+                    )
+
                 for sym in batch:
-                    try:
-                        bars = data[sym] if data is not None else result[sym]
-                    except (KeyError, TypeError):
-                        bars = []
+                    bars = bars_map.get(sym, [])
                     if len(bars) < 5:
                         self._avg_vol_cache[sym] = 0.0
                     else:
@@ -412,6 +423,50 @@ class Scanner:
                                i, e, type(e).__name__)
                 for sym in batch:
                     self._avg_vol_cache.setdefault(sym, 0.0)
+
+    @staticmethod
+    def _barset_to_dict(result) -> dict:
+        """Coerce alpaca-py's BarSet/dict/list response into a plain dict
+        of {symbol: list[Bar]}. Tries every access pattern observed across
+        alpaca-py versions:
+          - result.data is a dict (most modern versions)
+          - result.data is a flat list grouped by Bar.symbol (some versions)
+          - result is itself a dict subclass
+          - result is iterable yielding Bar objects with a .symbol attribute
+        """
+        # Pattern 1: result.data is a dict[str, list[Bar]]
+        data = getattr(result, "data", None)
+        if isinstance(data, dict):
+            return {k: list(v) if v is not None else [] for k, v in data.items()}
+
+        # Pattern 2: result.data is a flat list — group by Bar.symbol
+        if isinstance(data, list):
+            grouped: dict = {}
+            for b in data:
+                sym = getattr(b, "symbol", None)
+                if sym is None:
+                    continue
+                grouped.setdefault(sym, []).append(b)
+            return grouped
+
+        # Pattern 3: result is itself a dict subclass
+        if isinstance(result, dict):
+            return {k: list(v) if v is not None else [] for k, v in result.items()}
+
+        # Pattern 4: result is iterable yielding Bar objects
+        try:
+            grouped = {}
+            for b in result:
+                sym = getattr(b, "symbol", None)
+                if sym is None:
+                    continue
+                grouped.setdefault(sym, []).append(b)
+            if grouped:
+                return grouped
+        except Exception:
+            pass
+
+        return {}
 
     def _get_avg_daily_volume(self, symbol: str) -> float:
         """50-day avg volume. Reads from the cache populated by
