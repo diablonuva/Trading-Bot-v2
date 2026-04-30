@@ -392,15 +392,24 @@ class Scanner:
                     limit=55,
                 )
                 result = self._data.get_stock_bars(req)
+                # alpaca-py returns a BarSet which is dict-like via __getitem__
+                # but doesn't expose .get(). Use the underlying .data dict
+                # (which exists on alpaca-py's response models) and fall back
+                # to per-symbol __getitem__ with KeyError handling.
+                data = getattr(result, "data", None)
                 for sym in batch:
-                    bars = result.get(sym, [])
+                    try:
+                        bars = data[sym] if data is not None else result[sym]
+                    except (KeyError, TypeError):
+                        bars = []
                     if len(bars) < 5:
                         self._avg_vol_cache[sym] = 0.0
                     else:
                         vols = [float(b.volume) for b in bars[:-1]]
                         self._avg_vol_cache[sym] = sum(vols) / len(vols)
             except Exception as e:
-                logger.warning("Batch avg-vol fetch failed (offset %d): %s", i, e)
+                logger.warning("Batch avg-vol fetch failed (offset %d): %s (%s)",
+                               i, e, type(e).__name__)
                 for sym in batch:
                     self._avg_vol_cache.setdefault(sym, 0.0)
 
