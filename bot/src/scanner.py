@@ -343,9 +343,20 @@ class Scanner:
                 return None
             rel_vol = volume / avg_vol
 
-            float_shares = self._get_float(symbol)
-
-            has_news = self._has_recent_news(symbol)
+            # Defer the expensive Finviz scrape (1s sleep each) and Alpaca
+            # news lookup until we know rvol passes. Without this, the first
+            # scan of the day spends ~390 × 1s = 6+ minutes inside Finviz
+            # rate-limit sleeps. Candidates that fail rvol get float=None
+            # which means the float pillar is skipped in all_failures(), so
+            # they show up as near-misses on rvol (we don't know their
+            # float, but that's an acceptable trade-off vs minute-long scans).
+            rvol_min = self._cfg["scanner"]["relative_volume_min"]
+            if rel_vol >= rvol_min:
+                float_shares = self._get_float(symbol)
+                has_news = self._has_recent_news(symbol)
+            else:
+                float_shares = None
+                has_news = False
 
             premarket_gap = 0.0
             min_bar = getattr(snap, "minute_bar", None) or getattr(snap, "latest_bar", None)
