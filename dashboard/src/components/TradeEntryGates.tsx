@@ -67,7 +67,8 @@ export default function TradeEntryGates({
   }, [gatesData]);
 
   useEffect(() => {
-    return on("gate_check", (rec: GateCheck) => {
+    return on("gate_check", (data) => {
+      const rec = data as GateCheck;
       setPerSymbol((prev) => {
         const filtered = prev.filter((r) => r.symbol !== rec.symbol);
         return [rec, ...filtered].slice(0, 10);
