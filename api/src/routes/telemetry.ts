@@ -21,6 +21,28 @@ import { broadcast } from "../websocket";
 
 const router = Router();
 
+// Per-symbol latest gate-check, kept in process memory only. Cheap and high
+// frequency (one per bar per watchlist symbol), so persisting would just
+// bloat Postgres. Cleared every 30 min so stale entries don't pile up.
+interface GateCheckRecord {
+  symbol: string;
+  gates: Record<string, boolean>;
+  setup: string | null;
+  confidence: string | null;
+  ts: string;
+  receivedAt: number;
+}
+const gateCache = new Map<string, GateCheckRecord>();
+setInterval(() => {
+  const cutoff = Date.now() - 30 * 60 * 1000;
+  for (const [sym, rec] of gateCache.entries()) {
+    if (rec.receivedAt < cutoff) gateCache.delete(sym);
+  }
+}, 60 * 1000);
+export function getGateCache(): GateCheckRecord[] {
+  return [...gateCache.values()].sort((a, b) => b.receivedAt - a.receivedAt);
+}
+
 // ----------------------------------------------------------------
 // Session start
 // ----------------------------------------------------------------
@@ -239,6 +261,27 @@ router.post("/position", async (req: Request, res: Response) => {
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// ----------------------------------------------------------------
+// Per-bar gate-check from the strategy. Stored in-memory only and
+// broadcast over WebSocket so the dashboard's TradeEntryGates panel can
+// flip per-symbol pulses live.
+// ----------------------------------------------------------------
+router.post("/gate-check", async (req: Request, res: Response) => {
+  const { symbol, gates, setup, confidence, ts } = req.body;
+  if (!symbol || !gates) return res.status(400).json({ error: "symbol and gates required" });
+  const record: GateCheckRecord = {
+    symbol,
+    gates,
+    setup: setup ?? null,
+    confidence: confidence ?? null,
+    ts: ts ?? new Date().toISOString(),
+    receivedAt: Date.now(),
+  };
+  gateCache.set(symbol, record);
+  broadcast(req.app.locals.wss, "gate_check", record);
+  res.json({ ok: true });
 });
 
 // ----------------------------------------------------------------

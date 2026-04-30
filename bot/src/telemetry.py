@@ -194,6 +194,22 @@ class Telemetry:
             "unrealizedPnl": unrealized_pnl,
         })
 
+    def gate_check(
+        self,
+        symbol: str,
+        gates: dict,
+        setup: Optional[str] = None,
+        confidence: Optional[str] = None,
+    ) -> None:
+        """Per-bar strategy gate evaluation. Fires on every evaluate() call."""
+        self._post("/telemetry/gate-check", {
+            "symbol": symbol,
+            "gates": gates,
+            "setup": setup,
+            "confidence": confidence,
+            "ts": datetime.now(timezone.utc).isoformat(),
+        })
+
     # ------------------------------------------------------------------
     # Generic events
     # ------------------------------------------------------------------

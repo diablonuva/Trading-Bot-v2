@@ -117,7 +117,17 @@ export type WsEventType =
   | "bot_event"
   | "session_start"
   | "session_end"
-  | "daily_halt";
+  | "daily_halt"
+  | "gate_check";
+
+export interface GateCheck {
+  symbol: string;
+  gates: Record<string, boolean>;
+  setup: string | null;
+  confidence: string | null;
+  ts: string;
+  receivedAt: number;
+}
 
 export interface WsMessage {
   type: WsEventType;

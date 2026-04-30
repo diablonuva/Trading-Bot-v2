@@ -243,6 +243,18 @@ class TradingBot:
             return  # already in this trade
 
         signal = self._strategy.evaluate(symbol, df)
+
+        # Push the per-bar gate state to the dashboard so it's visible whether
+        # a signal was produced or not. Cheap call — fire-and-forget thread.
+        last = self._strategy.last_gates(symbol)
+        if last:
+            self._tel.gate_check(
+                symbol=symbol,
+                gates=last["gates"],
+                setup=last.get("setup"),
+                confidence=last.get("confidence"),
+            )
+
         if signal is None:
             return
 

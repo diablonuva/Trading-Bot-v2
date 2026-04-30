@@ -16,6 +16,7 @@ import telemetryRouter from "./routes/telemetry";
 import configRouter from "./routes/config";
 import marketRouter from "./routes/market";
 import portfolioRouter from "./routes/portfolio";
+import gatesRouter from "./routes/gates";
 import { broadcastMiddleware } from "./websocket";
 
 const PORT = parseInt(process.env.PORT || "4000", 10);
@@ -50,6 +51,8 @@ async function main() {
   app.use("/api/market", marketRouter);
   // Live Alpaca portfolio (account, positions, history)
   app.use("/api/portfolio", portfolioRouter);
+  // Per-bar strategy gate evaluations (in-memory)
+  app.use("/api/gates", gatesRouter);
 
   const server = http.createServer(app);
 

@@ -13,6 +13,7 @@ Designed to be called on every new 1-minute bar close.
 """
 
 import logging
+import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -53,6 +54,11 @@ class Strategy:
         self._flag_max_candles = ind["flag_max_candles"]
         self._topping_tail_ratio = ind["topping_tail_ratio"]
         self._rr_min = cfg["risk"]["reward_to_risk_min"]
+        # Per-symbol latest gate evaluation, populated by every evaluate() call
+        self._last_gates: dict[str, dict] = {}
+
+    def last_gates(self, symbol: str) -> Optional[dict]:
+        return self._last_gates.get(symbol)
 
     # ------------------------------------------------------------------
     # Main entry point — called on every new bar
@@ -62,38 +68,57 @@ class Strategy:
         """
         Returns a Signal if an A-quality setup is found, else None.
         Requires at least 30 candles for reliable indicator values.
+
+        Records per-bar gate state in self._last_gates[symbol] regardless of
+        whether a signal is produced — used by the dashboard to visualize
+        why an entry was or wasn't taken.
         """
-        if len(df) < 30:
-            return None
+        gates = {
+            "bars_ready":    False,  # >= 30 candles loaded
+            "macd_positive": False,  # MACD line > 0
+            "above_vwap":    False,  # last close > VWAP
+            "volume_surge":  False,  # rvol >= surge threshold
+            "pattern_match": False,  # any of 3 patterns detected
+            "a_quality":     False,  # detected pattern was A-grade
+        }
+        signal: Optional[Signal] = None
+        try:
+            if len(df) < 30:
+                return None
+            gates["bars_ready"] = True
 
-        # Gate 1: MACD must be positive (front side of the move)
-        macd = current_macd(df, self._macd_fast, self._macd_slow, self._macd_signal)
-        if not macd["is_positive"]:
-            return None
+            macd = current_macd(df, self._macd_fast, self._macd_slow, self._macd_signal)
+            if not macd["is_positive"]:
+                return None
+            gates["macd_positive"] = True
 
-        # Gate 2: Price must be above VWAP
-        vwap = current_vwap(df)
-        last_close = float(df["close"].iloc[-1])
-        if last_close < vwap:
-            return None
+            vwap = current_vwap(df)
+            last_close = float(df["close"].iloc[-1])
+            if last_close < vwap:
+                return None
+            gates["above_vwap"] = True
 
-        # Gate 3: Volume surge on the most recent candle
-        rvol = relative_volume(df, self._vol_avg_period)
-        has_vol_surge = rvol >= self._vol_surge
+            rvol = relative_volume(df, self._vol_avg_period)
+            has_vol_surge = rvol >= self._vol_surge
+            gates["volume_surge"] = has_vol_surge
 
-        # Try micro pullback first (higher frequency, lower hold time)
-        signal = self._detect_micro_pullback(symbol, df, vwap, has_vol_surge)
-        if signal:
+            signal = self._detect_micro_pullback(symbol, df, vwap, has_vol_surge)
+            if signal is None:
+                signal = self._detect_bull_flag(symbol, df, vwap, has_vol_surge)
+            if signal is None:
+                signal = self._detect_abcd(symbol, df, vwap, has_vol_surge)
+
+            if signal is not None:
+                gates["pattern_match"] = True
+                gates["a_quality"] = signal.confidence == "A"
             return signal
-
-        # Try bull flag (slower-forming, equally reliable)
-        signal = self._detect_bull_flag(symbol, df, vwap, has_vol_surge)
-        if signal:
-            return signal
-
-        # Try ABCD pattern (Fibonacci-based reversal)
-        signal = self._detect_abcd(symbol, df, vwap, has_vol_surge)
-        return signal
+        finally:
+            self._last_gates[symbol] = {
+                "ts": time.time(),
+                "gates": gates.copy(),
+                "setup": signal.setup if signal else None,
+                "confidence": signal.confidence if signal else None,
+            }
 
     # ------------------------------------------------------------------
     # Exit signals — checked against open positions each bar
