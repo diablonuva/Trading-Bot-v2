@@ -173,12 +173,17 @@ class Scanner:
         pct_floor = pct_min * 0.5
         deep_eval: dict = {}
         skipped_no_prev = 0  # symbols missing prev_daily_bar (no pct calc possible)
+        prefilter_errors = 0
         for symbol, snap in snapshots.items():
             try:
-                if snap.daily_bar is None or snap.prev_daily_bar is None:
+                # alpaca-py renamed prev_daily_bar -> previous_daily_bar somewhere
+                # along the way; tolerate both so we don't silently drop everything.
+                prev_bar = getattr(snap, "prev_daily_bar", None) \
+                    or getattr(snap, "previous_daily_bar", None)
+                if snap.daily_bar is None or prev_bar is None:
                     skipped_no_prev += 1
                     continue
-                prev_close = float(snap.prev_daily_bar.close)
+                prev_close = float(prev_bar.close)
                 if prev_close <= 0:
                     skipped_no_prev += 1
                     continue
@@ -187,8 +192,14 @@ class Scanner:
                     stats.rejected_pct += 1
                     continue
                 deep_eval[symbol] = snap
-            except Exception:
+            except Exception as e:
+                prefilter_errors += 1
+                if prefilter_errors <= 3:
+                    logger.warning("pct pre-filter error for %s: %s (%s)",
+                                   symbol, e, type(e).__name__)
                 continue
+        if prefilter_errors:
+            logger.warning("Pre-filter errors total: %d", prefilter_errors)
 
         if skipped_no_prev:
             logger.info("Skipped %d symbols with no prev_daily_bar", skipped_no_prev)
@@ -318,7 +329,9 @@ class Scanner:
             price = float(daily.close)
             volume = float(daily.volume)
 
-            prev_close = float(snap.prev_daily_bar.close) if snap.prev_daily_bar else None
+            prev_bar = getattr(snap, "prev_daily_bar", None) \
+                or getattr(snap, "previous_daily_bar", None)
+            prev_close = float(prev_bar.close) if prev_bar else None
             if prev_close and prev_close > 0:
                 pct_change = ((price - prev_close) / prev_close) * 100
             else:
@@ -335,8 +348,9 @@ class Scanner:
             has_news = self._has_recent_news(symbol)
 
             premarket_gap = 0.0
-            if snap.minute_bar and prev_close and prev_close > 0:
-                premarket_gap = ((float(snap.minute_bar.open) - prev_close) / prev_close) * 100
+            min_bar = getattr(snap, "minute_bar", None) or getattr(snap, "latest_bar", None)
+            if min_bar and prev_close and prev_close > 0:
+                premarket_gap = ((float(min_bar.open) - prev_close) / prev_close) * 100
 
             return CandidateStock(
                 symbol=symbol,
